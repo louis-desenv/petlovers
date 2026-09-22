@@ -2132,4 +2132,30 @@ function init() {
   console.info("🐱 Pet Agent iniciado — Inteligência artificial do Gemini linkada com Magic Hour.");
 }
 
+// Previne gestos indesejados de zoom em dispositivos móveis/touch
+function preventUnwantedZoom() {
+  document.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive: false });
+  document.addEventListener("gesturechange", (e) => { e.preventDefault(); }, { passive: false });
+  document.addEventListener("gestureend", (e) => { e.preventDefault(); }, { passive: false });
+
+  let lastTouchEnd = 0;
+  document.addEventListener("touchend", (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300) {
+      const tag = e.target ? e.target.tagName.toLowerCase() : "";
+      if (tag !== "input" && tag !== "textarea" && tag !== "button" && tag !== "a" && !e.target.closest("button") && !e.target.closest("a")) {
+        e.preventDefault();
+      }
+    }
+    lastTouchEnd = now;
+  }, { passive: false });
+
+  document.addEventListener("touchmove", (e) => {
+    if (e.touches && e.touches.length > 1) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+}
+
+preventUnwantedZoom();
 init();

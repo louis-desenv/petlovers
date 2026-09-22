@@ -1,9 +1,14 @@
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 console.log("🚀 Executando script de build para Vercel...");
 
 try {
+  // Executa o build do Vite primeiro
+  console.log("📦 Compilando aplicação frontend com Vite...");
+  execSync("npx vite build", { stdio: "inherit" });
+
   // Sincroniza imagens e vídeos do src/ para public/
   const srcImg = path.join(__dirname, "src", "dr-miau.png");
   const destImg = path.join(__dirname, "public", "dr-miau.png");
@@ -37,12 +42,11 @@ try {
     console.log("✅ Vídeos sincronizados para public/videos/");
   }
 
-  // Cria a pasta dist/ e copia os arquivos estáticos do public/
+  // Copia os arquivos estáticos de mídia para dist/
   const distDir = path.join(__dirname, "dist");
-  if (fs.existsSync(distDir)) {
-    fs.rmSync(distDir, { recursive: true, force: true });
+  if (!fs.existsSync(distDir)) {
+    fs.mkdirSync(distDir, { recursive: true });
   }
-  fs.cpSync(path.join(__dirname, "public"), distDir, { recursive: true });
 
   const distVideosDir = path.join(distDir, "videos");
   if (!fs.existsSync(distVideosDir)) {

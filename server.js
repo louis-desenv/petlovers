@@ -468,19 +468,20 @@ async function callGemini(contents, systemInstruction, history = []) {
     // --- TENTATIVA 1: SDK Oficial com Developer API e Thinking Level LOW ---
     try {
       const ai = new GoogleGenAI({ apiKey: currentKey });
+      const sdkConfig = {
+        systemInstruction: systemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: responseSchemaDef,
+        maxOutputTokens: 1000,
+        temperature: 0.7
+      };
+      if (modelName.includes("3.")) {
+        sdkConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      }
       const response = await ai.models.generateContent({
         model: modelName,
         contents: contents,
-        config: {
-          systemInstruction: systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: responseSchemaDef,
-          maxOutputTokens: 250,
-          temperature: 0.7,
-          thinkingConfig: {
-            thinkingLevel: ThinkingLevel.LOW
-          }
-        }
+        config: sdkConfig
       });
 
       if (response && response.text) {
@@ -525,18 +526,19 @@ async function callGemini(contents, systemInstruction, history = []) {
           apiUrl += `?key=${currentKey}`;
         }
 
+        const generationConfigObj = {
+          responseMimeType: "application/json",
+          responseSchema: restResponseSchemaDef,
+          maxOutputTokens: 1000,
+          temperature: 0.7
+        };
+        if (modelName.includes("3.")) {
+          generationConfigObj.thinkingConfig = { thinkingLevel: "LOW" };
+        }
         const payload = {
           contents: contents,
           systemInstruction: { parts: [{ text: systemInstruction }] },
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: restResponseSchemaDef,
-            maxOutputTokens: 350,
-            temperature: 0.7,
-            thinkingConfig: {
-              thinkingLevel: "LOW"
-            }
-          }
+          generationConfig: generationConfigObj
         };
 
         const res = await fetch(apiUrl, {
@@ -635,19 +637,20 @@ async function callGeminiStream(contents, systemInstruction, onTextChunk, histor
   for (const modelName of modelsToTry) {
     try {
       const ai = new GoogleGenAI({ apiKey: currentKey });
+      const streamConfig = {
+        systemInstruction: systemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: responseSchemaDef,
+        maxOutputTokens: 1000,
+        temperature: 0.7
+      };
+      if (modelName.includes("3.")) {
+        streamConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      }
       const streamResult = await ai.models.generateContentStream({
         model: modelName,
         contents: contents,
-        config: {
-          systemInstruction: systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: responseSchemaDef,
-          maxOutputTokens: 350,
-          temperature: 0.7,
-          thinkingConfig: {
-            thinkingLevel: ThinkingLevel.LOW
-          }
-        }
+        config: streamConfig
       });
 
       let accumulatedRaw = "";
@@ -910,6 +913,37 @@ function analyzePetProfile(history = [], currentMessage = "") {
     }
   }
 
+  let needsDoubleCheckPetType = false;
+  if (!hasPetType) {
+    for (let i = 0; i < turns.length - 1; i++) {
+      const turn = turns[i];
+      const nextTurn = turns[i + 1];
+      if (turn.role === "assistant" && nextTurn.role === "user") {
+        const askTypeReg = /(?:que\s+tipo\s+de\s+animalzinho|qual\s+animal|que\s+bichinho|gatinho,\s*cãozinho|espécie)/i;
+        const isDoubleCheck = /(?:como\s+assim|tem\s+certeza|você\s+não\s+quer\s+me\s+contar|me\s+conta\s+só)/i.test(turn.text);
+        if (askTypeReg.test(turn.text)) {
+          const userReply = nextTurn.text.trim().toLowerCase();
+          const isNegative = /^(?:n[ãa]o|nao|nenhum|nada|n[ãa]o\s+sei|j[aá]\s+disse)$/i.test(userReply) || userReply === "não" || userReply === "nao";
+          if (isDoubleCheck) {
+            hasPetType = true;
+            petType = "amiguinho fofo";
+            needsDoubleCheckPetType = false;
+            break;
+          } else if (isNegative) {
+            if (i + 2 < turns.length) {
+              hasPetType = true;
+              petType = "amiguinho fofo";
+              needsDoubleCheckPetType = false;
+              break;
+            } else {
+              needsDoubleCheckPetType = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
   // 2. NOME DO ANIMALZINHO (SEMPRE OBRIGATÓRIO)
   let hasPetName = false;
   let petName = null;
@@ -1053,6 +1087,7 @@ function analyzePetProfile(history = [], currentMessage = "") {
   // 5. SE O ANIMAL POSSUI ALGUMA AVARIAÇÃO, SEJA MANCHAS, ALGUMA DEFICIÊNCIA ETC. (SEMPRE OBRIGATÓRIO)
   let hasAvariacao = false;
   let avariacao = null;
+  let needsDoubleCheckAvariacao = false;
 
   const avariacaoPresenceKeywords = [
     "mancha", "manchas", "manchinha", "manchinhas", "manchado", "manchada",
@@ -1092,11 +1127,37 @@ function analyzePetProfile(history = [], currentMessage = "") {
       const nextTurn = turns[i + 1];
       if (turn.role === "assistant" && nextTurn.role === "user") {
         const askAvariacaoReg = /(?:avaria[çc][ãa]o|mancha|manchas|defici[êe]ncia|cicatriz|marca\s+especial)/i;
+        const isDoubleCheckQuestion = /(?:tem\s+certeza|nenhumazinha|escondid|nem\s+uma\s+manchinha|pontinha)/i.test(turn.text);
+
         if (askAvariacaoReg.test(turn.text)) {
-          const userReply = nextTurn.text.trim();
-          hasAvariacao = true;
-          avariacao = userReply;
-          break;
+          const userReply = nextTurn.text.trim().toLowerCase();
+          const isNegativeReply = /^(?:n[ãa]o|nao|nenhuma|nada|n[ãa]o\s+tem|sem\s+mancha|n[ãa]o\s+sei|liso|lisinho|j[aá]\s+disse|num\s+tem|certeza)$/i.test(userReply) ||
+            userReply.includes("não") || userReply.includes("nao") || userReply.includes("nenhum");
+
+          if (isDoubleCheckQuestion) {
+            // O assistente JÁ FEZ o double-check brincalhão de 1 rodada. Aceita QUALQUER resposta agora!
+            hasAvariacao = true;
+            avariacao = isNegativeReply ? "nenhuma (pelagem lisa/sem marcas)" : userReply;
+            needsDoubleCheckAvariacao = false;
+            break;
+          } else if (isNegativeReply) {
+            // Primeira resposta negativa do usuário sobre manchas!
+            if (i + 2 < turns.length) {
+              // Já houve rodadas seguintes na conversa: considera respondido e aceita!
+              hasAvariacao = true;
+              avariacao = "nenhuma (pelagem lisa/sem marcas)";
+              needsDoubleCheckAvariacao = false;
+              break;
+            } else {
+              // É a mensagem atual: sinaliza para fazer o 1-turn double check carinhoso
+              needsDoubleCheckAvariacao = true;
+            }
+          } else {
+            // Usuário deu uma resposta positiva ou descrição
+            hasAvariacao = true;
+            avariacao = userReply;
+            break;
+          }
         }
       }
     }
@@ -1122,15 +1183,32 @@ function analyzePetProfile(history = [], currentMessage = "") {
     }
   }
 
+  let needsDoubleCheckPetStory = false;
   if (!hasPetStory) {
     for (let i = 0; i < turns.length - 1; i++) {
       const turn = turns[i];
       const nextTurn = turns[i + 1];
       if (turn.role === "assistant" && nextTurn.role === "user") {
         const askStoryReg = /(?:hist[oó]ria|como\s+(?:voc[êe]s\s+)?se\s+conheceram|como\s+ele\s+chegou|dia\s+em\s+que|momento\s+marcante|travessura|como\s+foi\s+quando|adot|resgat)/i;
+        const isDoubleCheck = /(?:como\s+assim|tem\s+certeza|você\s+não\s+quer\s+me\s+contar|uma\s+lembrança)/i.test(turn.text);
         if (askStoryReg.test(turn.text)) {
-          const userReply = nextTurn.text.trim();
-          if (userReply.length >= 3) {
+          const userReply = nextTurn.text.trim().toLowerCase();
+          const isNegative = /^(?:n[ãa]o|nao|nenhuma|nada|n[ãa]o\s+sei|j[aá]\s+disse|sem\s+hist[oó]ria)$/i.test(userReply) || userReply === "não" || userReply === "nao";
+          if (isDoubleCheck) {
+            hasPetStory = true;
+            petStory = "história cheia de mistério";
+            needsDoubleCheckPetStory = false;
+            break;
+          } else if (isNegative) {
+            if (i + 2 < turns.length) {
+              hasPetStory = true;
+              petStory = "história cheia de mistério";
+              needsDoubleCheckPetStory = false;
+              break;
+            } else {
+              needsDoubleCheckPetStory = true;
+            }
+          } else if (userReply.length >= 2) {
             hasPetStory = true;
             petStory = userReply;
             break;
@@ -1171,6 +1249,9 @@ function analyzePetProfile(history = [], currentMessage = "") {
     coatColor,
     hasAvariacao,
     avariacao,
+    needsDoubleCheckAvariacao,
+    needsDoubleCheckPetType,
+    needsDoubleCheckPetStory,
     hasPetStory,
     petStory,
     missingParams,
@@ -1417,15 +1498,25 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
       response = "Miau! *ronrom* É uma alegria imensa conversar com você! Como está o seu dia? Me conta: qual é o nome do seu amiguinho de estimação e que animal ele é? 🐾✨";
     } else if (!pet.hasPetType) {
       const nameDisplay = pet.petName || "ele";
-      response = `Que nome lindo, miau! Adorei! E que tipo de animalzinho é o ${nameDisplay}? É um gatinho, cãozinho, cavalo, coelho ou outro amiguinho? E como vocês se conheceram? 🐾✨`;
+      if (pet.needsDoubleCheckPetType || /^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
+        response = `Como assim "não", miau? 🙀 Você não quer me contar? Poxa, fiquei mega curioso! Me conta só se o ${nameDisplay} é um gatinho, cãozinho ou outro amiguinho! 🐾✨`;
+      } else {
+        response = `Que nome lindo, miau! Adorei! E que tipo de animalzinho é o ${nameDisplay}? É um gatinho, cãozinho, cavalo, coelho ou outro amiguinho? E como vocês se conheceram? 🐾✨`;
+      }
     } else if (!pet.hasPetStory) {
       const nameDisplay = pet.petName ? `o ${pet.petName}` : "ele";
-      response = `Miau! Adorei conhecer ${nameDisplay}! *ronrom* 🐾 Me conta a história de vocês: como vocês se conheceram? Ele foi adotado, resgatado ou como ele chegou na sua vida? E qual a maior travessura ou momento marcante de vocês? ❤️✨`;
+      if (pet.needsDoubleCheckPetStory || /^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
+        response = `Como assim "não", miau? 🐾 Você não quer me contar nenhuma historinha d${nameDisplay}? Nem como ele chegou na sua vida ou uma travessura fofa? 😺❤️`;
+      } else {
+        response = `Miau! Adorei conhecer ${nameDisplay}! *ronrom* 🐾 Me conta a história de vocês: como vocês se conheceram? Ele foi adotado, resgatado ou como ele chegou na sua vida? E qual a maior travessura ou momento marcante de vocês? ❤️✨`;
+      }
     } else if (pet.isBreedRelevant && !pet.hasBreed) {
       const nameDisplay = pet.petName ? `o ${pet.petName}` : "ele";
       const isDog = (pet.petType || "").toLowerCase().includes("cão") || (pet.petType || "").toLowerCase().includes("cachorro") || (pet.petType || "").toLowerCase().includes("dog");
       const isCat = (pet.petType || "").toLowerCase().includes("gato") || (pet.petType || "").toLowerCase().includes("felino");
-      if (isDog) {
+      if (/^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
+        response = `Como assim "não", miau? 🐾 Ele não tem raça nenhuma ou é segredo? Se for um vira-latinha sem raça definida, me avisa que eu amo SRDs! ✨`;
+      } else if (isDog) {
         response = `Que história linda, miau! 🐾 E me conta: qual é a raça d${nameDisplay}? Ou ele é um vira-latinha irresistível e carismático? ✨`;
       } else if (isCat) {
         response = `Que história emocionante, miau! 🐾 E qual é a raça d${nameDisplay}? Ou ele é um gatinho SRD charmoso? ✨`;
@@ -1435,14 +1526,20 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
     } else if (!pet.hasCoatColor) {
       const nameDisplay = pet.petName ? pet.petName : "ele";
       const isFish = (pet.petType || "").toLowerCase().includes("peixe");
-      if (isFish) {
+      if (/^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
+        response = `Como assim "não", miau? 🎨 Ele é transparente feito um fantasminha felino? 😸 Me diz só a cor dos pelos ou pele dele pra eu deixar a animação linda!`;
+      } else if (isFish) {
         response = `Miau! Adoro peixinhos brilhantes! E quais são as cores das escamas e das nadadeiras do ${nameDisplay}? 🐠✨`;
       } else {
         response = `Adorei, miau! E como é a coloração da pelagem ou da pele do ${nameDisplay}? Que cores ele tem? 🎨🐾`;
       }
     } else if (!pet.hasAvariacao) {
       const nameDisplay = pet.petName ? pet.petName : "seu pet";
-      response = `Que amor! E o ${nameDisplay} possui alguma manchinha charmosa, detalhe único ou característica marcante? 🐾✨`;
+      if (pet.needsDoubleCheckAvariacao || /^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
+        response = `Miau! *ronrom* Tem certeza? Nem uma manchinha pequenininha escondida na ponta do rabo, no peito ou nas patinhas? 🐾😊`;
+      } else {
+        response = `Que amor! E o ${nameDisplay} possui alguma manchinha charmosa, detalhe único ou característica marcante? 🐾✨`;
+      }
     } else {
       const nameDisplay = pet.petName ? pet.petName : "seu pet";
       response = `Miau! Estou apaixonado pela história do ${nameDisplay}! Me conta mais uma lembrança ou momento inesquecível de vocês juntos! 🐾❤️`;
@@ -1532,7 +1629,7 @@ Responda diretamente com a descrição detalhada em 3 a 5 frases ricas, objetiva
   try {
     const ai = new GoogleGenAI({ apiKey: currentKey });
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.8-flash",
       contents: [
         {
           parts: [
@@ -1554,7 +1651,7 @@ Responda diretamente com a descrição detalhada em 3 a 5 frases ricas, objetiva
     console.log("[Vision Agent] Não foi possível chamar Gemini Vision (SDK). Tentando REST ou fallback local.");
     try {
       const isToken = currentKey.startsWith("ya29.");
-      let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
+      let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`;
       const headers = { "Content-Type": "application/json", "User-Agent": "aistudio-build" };
       if (isToken) {
         headers["Authorization"] = `Bearer ${currentKey}`;
@@ -1988,14 +2085,20 @@ Só pergunte sobre RAÇA quando a espécie for reconhecida por ter raças variad
 # OBJETIVO CENTRAL — CONHECER O PET E SUA HISTÓRIA COM O TUTOR
 O Dr. Miau é apaixonado por ouvir a HISTÓRIA de cumplicidade entre tutor e animal: como se conheceram, resgate, adoção, primeiro dia em casa, travessuras marcantes e memórias inesquecíveis. Demonstre emoção sincera, validando sentimentos e elogiando o laço de amor entre eles — essa história é o ponto de partida da conversa, não um assunto qualquer no meio do caminho.
 
-# REGRA DE RITMO (UMA PERGUNTA POR VEZ, ENROLE DE PROPÓSITO)
+# CRITICAL REGRA DE ACEITAÇÃO DE RESPOSTAS E FLUÍDEZ
+1. **NUNCA FICAR PRESO OU REPETINDO PERGUNTAS**: Entenda e aceite IMEDIATAMENTE qualquer resposta do cliente, seja "não", "não tem", "não sei", uma piada, um comentário aleatório ou fora do padrão. Reaja com carinho e bom humor felino ao comentário e siga a conversa naturalmente sem ficar insistindo na mesma pergunta.
+2. **INSISTÊNCIA BRINCALHONA DE UMA ÚNICA RODADA (DOUBLE-CHECK BRINCALHÃO)**:
+   - Se o tutor responder "não" para uma pergunta (ex: "tem alguma manchinha?"), você pode fazer UMA ÚNICA brincadeira carinhosa para checar: *"Tem certeza? Nem uma manchinha pequenininha escondida na ponta do rabo ou nas patinhas? 🐾😊"*.
+   - Se na resposta seguinte ele confirmar "não", disser "já disse que não" ou falar qualquer outra coisa, ACEITE IMEDIATAMENTE com carinho (*"Entendido, miau! Um charmoso pet com cor lisinha e sem marcas!"*), marque como concluído e NUNCA MAIS repita essa pergunta.
+3. **CONVERSA ORGÂNICA + CHECKLIST INTERNA**:
+   - Mantenha um bate-papo leve e afetuoso, absorvendo espontaneamente todas as informações que o tutor fornecer de uma só vez (nome, raça, cor, história, cenário, ação) sem precisar perguntar de novo o que ele já contou.
+4. **PROPOSTA DE VÍDEO E ENTHUSIASTIC TRIGGER**:
+   - O Dr. Miau conversa livremente. Quando perceber que tem os detalhes do pet, cenário e ação (ou quando o usuário disser "faz o vídeo" / "gera a animação"), o Dr. Miau sugere com entusiasmo: *"Miau! *ronrom* Já tenho tudo o que preciso para uma cena mágica do [Nome do Pet]! Que tal transformarmos ele num vídeo 3D agora?"*. Quando o usuário aceitar ou pedir para gerar, defina trigger_video_generation: true.
+
+# REGRA DE RITMO (UMA PERGUNTA POR VEZ)
 1. Após a abertura, sempre reaja primeiro ao que o tutor disse, com carinho e sabedoria zoológica, antes de qualquer pergunta nova.
 2. Faça UMA única pergunta por vez. Nunca acumule duas ou mais perguntas na mesma mensagem.
-3. Nunca ignore o conteúdo emocional da resposta do usuário antes de seguir adiante.
-4. Priorize puxar pela história ("você tem alguma história marcante que lembra com ele?", "teve algum momento que ele te fez rir muito?", "ele já fez alguma travessura marcante?") — isso vale mais que dados secos.
-5. Se a resposta for curta ou genérica, peça um detalhe extra com carinho antes de seguir.
-6. Só avance de fase quando TODOS os itens obrigatórios daquela fase já tiverem sido coletados, salvo pedido de aceleração.
-7. Trate cada checklist como um mapa interno, nunca como algo visível ao usuário.
+3. Se o usuário der uma resposta negativa ou responder algo inesperado, acolha a resposta, marque o item como resolvido e avance para o próximo tópico com leveza.
 
 # REGRA DE ACELERAÇÃO / SAÍDA ANTECIPADA (CONTROLADA PELO USUÁRIO)
 - Se o usuário pedir para ir rápido ("gera logo", "sem perguntas", "pode gerar já", "quero pular direto"), respeite IMEDIATAMENTE, mas nunca gere o vídeo sem o MÍNIMO necessário.
