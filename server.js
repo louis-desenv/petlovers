@@ -46,7 +46,7 @@ function getEnvFileVar(varName) {
   } catch (e) {}
   return "";
 }
-const { GoogleGenAI, Type } = require("@google/genai");
+const { GoogleGenAI, Type, ThinkingLevel } = require("@google/genai");
 
 // Mensagens iniciais padrão do sistema para filtragem de histórico
 const INITIAL_MESSAGE = "Olá! Sou o Dr. Miau! 🐾 É um prazer imenso estar aqui com você! Fique à vontade para bater um papo, contar como foi seu dia ou me fazer qualquer pergunta!";
@@ -258,7 +258,7 @@ async function checkApiStatuses() {
     status.gemini.error = "GEMINI_API_KEY_MISSING";
     status.gemini.message = "A variável GEMINI_API_KEY não foi encontrada. No Railway: acesse seu serviço > aba Variables > adicione GEMINI_API_KEY com sua chave do Google AI Studio.";
   } else {
-    const testModels = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.8-flash"];
+    const testModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
     let pingSuccess = false;
     let lastErrMessage = "";
 
@@ -388,6 +388,8 @@ function buildAlternatingContents(cleanedHistory, currentMessage) {
   }));
 }
 
+let cachedWorkingModel = "gemini-3.8-flash";
+
 // Criamos uma função de inicialização e consulta resiliente do Gemini
 async function callGemini(contents, systemInstruction, history = []) {
   let lastUserText = "";
@@ -421,6 +423,7 @@ async function callGemini(contents, systemInstruction, history = []) {
       },
       sentiment: {
         type: Type.STRING,
+        enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"],
         description: "A emoção correspondente do avatar: alegre, neutro, preocupado, protetor, confuso"
       },
       phase: {
@@ -456,15 +459,14 @@ async function callGemini(contents, systemInstruction, history = []) {
     required: ["response", "sentiment", "phase", "progress", "trigger_video_generation", "video_prompt"]
   };
 
-  const modelsToTry = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"];
+  // Modelos suportados oficiais em ordem de velocidade e resiliência de cota
+  const baseModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  const modelsToTry = Array.from(new Set([cachedWorkingModel, ...baseModels]));
   const lastErrors = [];
 
   for (const modelName of modelsToTry) {
-    console.log(`[Gemini Client] Tentando modelo: ${modelName}`);
-
-    // --- TENTATIVA 1: SDK Oficial com Developer API ---
+    // --- TENTATIVA 1: SDK Oficial com Developer API e Thinking Level LOW ---
     try {
-      console.log(`[Gemini Client] Conectando via SDK oficial com Developer API (${modelName})...`);
       const ai = new GoogleGenAI({ apiKey: currentKey });
       const response = await ai.models.generateContent({
         model: modelName,
@@ -473,12 +475,17 @@ async function callGemini(contents, systemInstruction, history = []) {
           systemInstruction: systemInstruction,
           responseMimeType: "application/json",
           responseSchema: responseSchemaDef,
-          maxOutputTokens: 2500
+          maxOutputTokens: 250,
+          temperature: 0.7,
+          thinkingConfig: {
+            thinkingLevel: ThinkingLevel.LOW
+          }
         }
       });
 
       if (response && response.text) {
-        console.log(`✅ [Gemini Client] Sucesso usando SDK oficial com ${modelName}!`);
+        cachedWorkingModel = modelName;
+        console.log(`⚡ [Gemini Fast Client] Resposta rápida gerada com ${modelName}!`);
         return response.text;
       }
     } catch (sdkErr) {
@@ -500,15 +507,12 @@ async function callGemini(contents, systemInstruction, history = []) {
       console.log(`⚠️ [Gemini Client] ${sdkErrLog}`);
       lastErrors.push(sdkErrLog);
 
-      // Se for erro de cota ou modelo indisponível, tenta o próximo modelo da lista
       if (isQuotaError) {
-        console.log(`[Gemini Client] Cota atingida para ${modelName}, tentando próximo modelo...`);
         continue;
       }
 
       // --- TENTATIVA 2: REST API Direta ---
       try {
-        console.log(`[Gemini Client] Tentando REST API direta (${modelName})...`);
         let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
         const headers = {
           "Content-Type": "application/json",
@@ -527,7 +531,11 @@ async function callGemini(contents, systemInstruction, history = []) {
           generationConfig: {
             responseMimeType: "application/json",
             responseSchema: restResponseSchemaDef,
-            maxOutputTokens: 2500
+            maxOutputTokens: 350,
+            temperature: 0.7,
+            thinkingConfig: {
+              thinkingLevel: "LOW"
+            }
           }
         };
 
@@ -541,7 +549,8 @@ async function callGemini(contents, systemInstruction, history = []) {
           const json = await res.json();
           const extracted = json.candidates?.[0]?.content?.parts?.[0]?.text;
           if (extracted) {
-            console.log(`✅ [Gemini Client] Sucesso via REST API com ${modelName}!`);
+            cachedWorkingModel = modelName;
+            console.log(`⚡ [Gemini Fast Client] Sucesso via REST com ${modelName}!`);
             return extracted;
           }
         } else {
@@ -556,13 +565,134 @@ async function callGemini(contents, systemInstruction, history = []) {
         lastErrors.push(restNetErrLog);
       }
     }
-
-    await new Promise(resolve => setTimeout(resolve, 100));
   }
 
   const failureReason = `FALHA_CONEXAO_GEMINI: Todas as tentativas com a API do Gemini falharam no servidor. Erros registrados: ${lastErrors.join(" | ")}`;
   console.error("❌ " + failureReason);
   return generateSmartFallback(lastUserText, history, failureReason);
+}
+
+// Função de streaming de texto do Gemini em tempo real
+async function callGeminiStream(contents, systemInstruction, onTextChunk, history = []) {
+  let lastUserText = "";
+  if (Array.isArray(contents) && contents.length > 0) {
+    const lastItem = contents[contents.length - 1];
+    if (typeof lastItem === "string") {
+      lastUserText = lastItem;
+    } else if (lastItem.parts && Array.isArray(lastItem.parts) && lastItem.parts[0]) {
+      lastUserText = lastItem.parts[0].text || "";
+    } else if (lastItem.text) {
+      lastUserText = lastItem.text;
+    }
+  }
+
+  const currentKey = getCurrentKey();
+  if (!currentKey) {
+    const errorDetails = "GEMINI_API_KEY_MISSING: Chave GEMINI_API_KEY não configurada.";
+    const fb = generateSmartFallbackObject(lastUserText, history, errorDetails);
+    if (onTextChunk && fb.response) {
+      onTextChunk(fb.response);
+    }
+    return JSON.stringify(fb);
+  }
+
+  const responseSchemaDef = {
+    type: Type.OBJECT,
+    properties: {
+      response: {
+        type: Type.STRING,
+        description: "A resposta do Dr. Miau em português de 2 a 4 frases felinas amigáveis e acolhedoras."
+      },
+      sentiment: {
+        type: Type.STRING,
+        enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"],
+        description: "A emoção correspondente do avatar: alegre, neutro, preocupado, protetor, confuso"
+      },
+      phase: {
+        type: Type.INTEGER,
+        description: "A fase atual da entrevista (1, 2 ou 3)."
+      },
+      progress: {
+        type: Type.INTEGER,
+        description: "O progresso acumulado da entrevista de 0 a 100."
+      },
+      trigger_video_generation: {
+        type: Type.BOOLEAN,
+        description: "Defina como true apenas quando todas as 3 fases forem concluídas com sucesso."
+      },
+      video_prompt: {
+        type: Type.STRING,
+        description: "O prompt sintetizado detalhado em inglês para o Magic Hour, ou string vazia se trigger_video_generation for false."
+      }
+    },
+    required: ["response", "sentiment", "phase", "progress", "trigger_video_generation", "video_prompt"]
+  };
+
+  // Modelos suportados oficiais em ordem de velocidade e resiliência de cota
+  const baseModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  const modelsToTry = Array.from(new Set([cachedWorkingModel, ...baseModels]));
+
+  for (const modelName of modelsToTry) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: currentKey });
+      const streamResult = await ai.models.generateContentStream({
+        model: modelName,
+        contents: contents,
+        config: {
+          systemInstruction: systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: responseSchemaDef,
+          maxOutputTokens: 350,
+          temperature: 0.7,
+          thinkingConfig: {
+            thinkingLevel: ThinkingLevel.LOW
+          }
+        }
+      });
+
+      let accumulatedRaw = "";
+      let streamedResponseLength = 0;
+
+      for await (const chunk of streamResult) {
+        const text = chunk.text || "";
+        accumulatedRaw += text;
+
+        const match = accumulatedRaw.match(/"response"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        if (match && match[1]) {
+          const currentExtracted = match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n');
+          if (currentExtracted.length > streamedResponseLength) {
+            const delta = currentExtracted.slice(streamedResponseLength);
+            streamedResponseLength = currentExtracted.length;
+            if (onTextChunk && delta) {
+              onTextChunk(delta);
+            }
+          }
+        }
+      }
+
+      if (accumulatedRaw.trim()) {
+        cachedWorkingModel = modelName;
+        console.log(`⚡ [Gemini Stream Client] Stream concluído com sucesso via ${modelName}!`);
+        return accumulatedRaw;
+      }
+    } catch (streamErr) {
+      console.warn(`⚠️ [Gemini Stream Client] Erro no stream com ${modelName}:`, streamErr.message?.slice(0, 100));
+    }
+  }
+
+  // Fallback rápido
+  const regularResponse = await callGemini(contents, systemInstruction, history);
+  try {
+    const p = typeof regularResponse === "string" ? JSON.parse(regularResponse) : regularResponse;
+    if (onTextChunk && p.response) {
+      onTextChunk(p.response);
+    }
+  } catch {
+    if (onTextChunk && regularResponse) {
+      onTextChunk(regularResponse);
+    }
+  }
+  return regularResponse;
 }
 
 function cleanPortugueseText(str) {
@@ -606,19 +736,119 @@ function cleanPortugueseText(str) {
 const BREED_RELEVANT_SPECIES = [
   "cachorro", "cachorra", "cadela", "cão", "cao", "cãozinho", "caozinho", "dog", "doguinho", "filhote", "canino",
   "gato", "gata", "gatinho", "gatinha", "felino", "cat", "bichano",
-  "cavalo", "égua", "egua", "potro", "potrinho", "equino",
-  "peixe", "peixinho", "betta", "carpa", "kinguio", "lebiste",
-  "coelho", "coelha", "coelhinho", "coelhinha",
-  "calopsita", "canário", "canario", "periquito"
+  "cavalo", "égua", "egua", "potro", "potrinho", "equino"
 ];
 
 const NON_BREED_SPECIES = [
-  "elefante", "elefanta", "elefantinho", "tartaruga", "jabuti", "cágado", "papagaio", "arara", "hamster", 
+  "peixe", "peixinho", "betta", "carpa", "kinguio", "lebiste", "tetra", "guppy", "baiacu",
+  "coelho", "coelha", "coelhinho", "coelhinha",
+  "calopsita", "canário", "canario", "periquito", "papagaio", "arara", "cacatua", "ave", "pássaro", "passarinho",
+  "elefante", "elefanta", "elefantinho", "tartaruga", "jabuti", "cágado", "hamster", 
   "porquinho-da-índia", "porquinho da índia", "porquinho da india", "chinchila", "furão", "furao", 
   "iguana", "cobra", "serpente", "lagarto", "sapo", "camaleão", "camaleao", "leão", "leao", "leoa", 
   "tigre", "urso", "macaco", "girafa", "zebra", "jacaré", "jacare", "pinguim", "panda", "lobo", "raposa",
   "bode", "cabra", "ovelha", "porco", "porquinho", "vaca", "boi", "preguiça", "rinoceronte", "hipopótamo"
 ];
+
+function translateToEnglishCinematicTerms(petType, petBreed, coatColor, scenarioText, actionText, petName) {
+  const name = petName || "our cute hero";
+  
+  // Mapeamento de tipo de animal
+  const typeMap = {
+    "peixe": "goldfish",
+    "peixinho": "little cute tropical fish",
+    "betta": "magnificent Betta fish",
+    "carpa": "majestic koi fish",
+    "kinguio": "cute round goldfish",
+    "cachorro": "adorable dog",
+    "cachorra": "adorable dog",
+    "cão": "adorable puppy dog",
+    "cao": "adorable puppy dog",
+    "dog": "playful dog",
+    "doguinho": "sweet little puppy",
+    "gato": "fluffy adorable cat",
+    "gata": "sweet charming cat",
+    "gatinho": "tiny playful kitten",
+    "coelho": "fluffy cute bunny rabbit",
+    "cavalo": "majestic gentle horse",
+    "calopsita": "colorful cockatiel bird",
+    "papagaio": "vibrant parrot",
+    "passaro": "little sweet bird",
+    "pássaro": "little sweet bird",
+    "tartaruga": "cute friendly turtle",
+    "hamster": "chubby little hamster"
+  };
+
+  const rawType = (petType || "").toLowerCase().trim();
+  let enPetType = "adorable pet";
+  for (const [pt, en] of Object.entries(typeMap)) {
+    if (rawType.includes(pt)) {
+      enPetType = en;
+      break;
+    }
+  }
+
+  // Mapeamento de cores
+  const colorMap = {
+    "vermelho": "radiant ruby red and vibrant shimmering scales",
+    "vermelha": "radiant ruby red and vibrant shimmering scales",
+    "azul": "vibrant royal blue with glowing tones",
+    "amarelo": "bright sunny golden yellow",
+    "dourado": "shimmering metallic gold",
+    "preto": "sleek velvety midnight black",
+    "branco": "pure snowy white",
+    "laranja": "warm bright glowing orange",
+    "caramelo": "warm golden caramel",
+    "marrom": "rich warm chocolate brown",
+    "cinza": "soft silver grey",
+    "rajado": "expressive striped tabby pattern",
+    "malhado": "spotted charming coat",
+    "tricolor": "colorful three-tone pattern"
+  };
+
+  const rawColor = (coatColor || "").toLowerCase().trim();
+  let enColor = "vibrant beautiful colors";
+  for (const [pt, en] of Object.entries(colorMap)) {
+    if (rawColor.includes(pt)) {
+      enColor = en;
+      break;
+    }
+  }
+
+  // Mapeamento de cenário
+  let enScenario = "in a charming, cozy, beautifully lit sun-drenched home setting";
+  const rawScen = (scenarioText || "").toLowerCase().trim();
+  if (rawScen.includes("praia") || rawScen.includes("mar") || rawScen.includes("oceano")) {
+    enScenario = "on a stunning sun-kissed tropical beach with sparkling crystal-clear waters and golden sands";
+  } else if (rawScen.includes("floresta") || rawScen.includes("bosque") || rawScen.includes("árvores")) {
+    enScenario = "inside an enchanted magical fairy-tale forest illuminated by soft fireflies and sunbeams";
+  } else if (rawScen.includes("jardim") || rawScen.includes("flores") || rawScen.includes("parque")) {
+    enScenario = "in a lush blooming colorful garden overflowing with vibrant magical flowers";
+  } else if (rawScen.includes("espaço") || rawScen.includes("espaco") || rawScen.includes("galáxia") || rawScen.includes("estrelas")) {
+    enScenario = "floating weightlessly through a breathtaking cosmic galaxy surrounded by glittering stars and colorful nebulae";
+  } else if (rawScen.includes("castelo") || rawScen.includes("reino")) {
+    enScenario = "inside a grand enchanted royal fantasy castle hall with warm glowing chandeliers";
+  } else if (rawScen.includes("cidade") || rawScen.includes("casa") || rawScen.includes("sala")) {
+    enScenario = rawType.includes("peixe") 
+      ? "inside a cozy modern sunlit home, swimming joyfully in a sparkling crystal-clear decorated aquarium" 
+      : "inside a warm sunlit cozy modern living room with soft comfortable aesthetic decor";
+  }
+
+  // Mapeamento de ação
+  let enAction = "enjoying a wonderful joyful moment with lively expressive animations";
+  const rawAct = (actionText || "").toLowerCase().trim();
+  if (rawType.includes("peixe")) {
+    enAction = "swimming with graceful joyful acrobatic spins and blowing magical glowing water bubbles";
+  } else if (rawAct.includes("correr") || rawAct.includes("correndo") || rawAct.includes("brincar")) {
+    enAction = "running happily and bouncing around with boundless excitement and pure joy";
+  } else if (rawAct.includes("dormir") || rawAct.includes("soneca") || rawAct.includes("deitado")) {
+    enAction = "curled up cozily taking a peaceful sweet nap with soft gentle breathing animations";
+  } else if (rawAct.includes("skate") || rawAct.includes("voar") || rawAct.includes("heroi") || rawAct.includes("herói")) {
+    enAction = "performing dynamic energetic heroic moves with playful cinematic flair";
+  }
+
+  return `A breathtaking 3D Pixar-Disney style cinematic animation of an adorable ${enPetType} named ${name} with ${enColor}, ${enAction} ${enScenario}. Soft volumetric lighting, expressive facial animation, joyful and whimsical mood, ultra-detailed 8k render, masterpiece cinematography.`;
+}
 
 function analyzePetProfile(history = [], currentMessage = "") {
   const turns = [];
@@ -872,21 +1102,61 @@ function analyzePetProfile(history = [], currentMessage = "") {
     }
   }
 
+  // 6. HISTÓRIA DO TUTOR COM O ANIMAL (COMO SE CONHECERAM, ADOÇÃO, MEMÓRIAS, TRAVESSURAS)
+  let hasPetStory = false;
+  let petStory = null;
+
+  const storyKeywords = [
+    "adot", "resgat", "achei", "encontrei", "comprei", "ganhei", "rua", "filhote", "filhotinho", "bebê",
+    "história", "historia", "conheci", "conhecemos", "trouxe", "anos juntos", "meses juntos", "dia em que",
+    "lembro", "memória", "primeira vez", "apaixonei", "amor", "grude", "dorme comigo", "companheiro", "companheira",
+    "mudou minha vida", "travessura", "apronta", "brincalhão", "carinhoso", "fofinho", "resgate", "abrigo", "feira de adoção",
+    "doação", "doaram", "veio pra casa", "apareceu", "adotivo", "adotiva"
+  ];
+
+  for (const sk of storyKeywords) {
+    if (combinedUserText.includes(sk)) {
+      hasPetStory = true;
+      petStory = "história compartilhada pelo tutor";
+      break;
+    }
+  }
+
+  if (!hasPetStory) {
+    for (let i = 0; i < turns.length - 1; i++) {
+      const turn = turns[i];
+      const nextTurn = turns[i + 1];
+      if (turn.role === "assistant" && nextTurn.role === "user") {
+        const askStoryReg = /(?:hist[oó]ria|como\s+(?:voc[êe]s\s+)?se\s+conheceram|como\s+ele\s+chegou|dia\s+em\s+que|momento\s+marcante|travessura|como\s+foi\s+quando|adot|resgat)/i;
+        if (askStoryReg.test(turn.text)) {
+          const userReply = nextTurn.text.trim();
+          if (userReply.length >= 3) {
+            hasPetStory = true;
+            petStory = userReply;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   const missingParams = [];
   if (!hasPetName) missingParams.push("Nome do animal");
   if (!hasPetType) missingParams.push("Tipo do animal (gato, cachorro, cavalo, peixe, elefante...)");
   if (isBreedRelevant && !hasBreed) missingParams.push("Raça (ou confirmação de vira-lata/SRD)");
   if (!hasCoatColor) missingParams.push("Coloração de pele ou pelos");
   if (!hasAvariacao) missingParams.push("Avariações ou características marcantes (manchas, cicatriz, deficiência ou confirmação de que não possui)");
+  if (!hasPetStory) missingParams.push("História do tutor com o animal (como se conheceram, memórias, travessuras)");
 
-  const isPhase1Complete = hasPetType && hasPetName && hasBreed && hasCoatColor && hasAvariacao;
+  const isPhase1Complete = hasPetType && hasPetName && hasBreed && hasCoatColor && hasAvariacao && hasPetStory;
 
   const checklistText = `
 - 1. Nome do animal: ${hasPetName ? `✅ CONHECIDO ("${petName}")` : "❌ PENDENTE (Perguntar o nome do animalzinho)"}
 - 2. Tipo do animal: ${hasPetType ? `✅ CONHECIDO ("${petType}")` : "❌ PENDENTE (Perguntar qual é o animal: gato, cachorro, elefante...)"}
-- 3. Raça: ${!isBreedRelevant ? "➖ NÃO SE APLICA (animal sem raças conhecidas)" : hasBreed ? `✅ CONHECIDO ("${petBreed}")` : "❌ PENDENTE (Perguntar a raça ou se é vira-lata)"}
-- 4. Coloração da pele, pelagem ou plumagem: ${hasCoatColor ? `✅ CONHECIDO ("${coatColor}")` : "❌ PENDENTE (Perguntar a cor da pele ou pelos)"}
-- 5. Variação ou característica marcante: ${hasAvariacao ? `✅ CONHECIDO ("${avariacao}")` : "❌ PENDENTE (Perguntar se possui manchas, deficiência, cicatriz ou se é sem marcas especiais)"}
+- 3. História do tutor com o pet: ${hasPetStory ? `✅ CONHECIDA ("${petStory}")` : "❌ PENDENTE (Perguntar como se conheceram, como foi a chegada dele ou momentos marcantes)"}
+- 4. Raça: ${!isBreedRelevant ? "➖ NÃO SE APLICA (animal sem raças conhecidas)" : hasBreed ? `✅ CONHECIDO ("${petBreed}")` : "❌ PENDENTE (Perguntar a raça ou se é vira-lata)"}
+- 5. Coloração da pele, pelagem ou plumagem: ${hasCoatColor ? `✅ CONHECIDO ("${coatColor}")` : "❌ PENDENTE (Perguntar a cor da pele ou pelos)"}
+- 6. Variação ou característica marcante: ${hasAvariacao ? `✅ CONHECIDO ("${avariacao}")` : "❌ PENDENTE (Perguntar se possui manchas, deficiência, cicatriz ou se é sem marcas especiais)"}
 `.trim();
 
   return {
@@ -901,6 +1171,8 @@ function analyzePetProfile(history = [], currentMessage = "") {
     coatColor,
     hasAvariacao,
     avariacao,
+    hasPetStory,
+    petStory,
     missingParams,
     isPhase1Complete,
     checklistText
@@ -1140,35 +1412,61 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
     phase = 1;
     sentiment = "alegre";
 
-    // Conduz a conversa rendendo papo amigável e coletando os 5 parâmetros essenciais
+    // Conduz a conversa com carinho, priorizando a história do tutor com o animal
     if (!pet.hasPetName) {
-      response = "Miau! *ronrom* É uma alegria imensa conversar com você! Como está o seu dia? Me conta: qual é o nome do seu amiguinho de estimação? 🐾✨";
+      response = "Miau! *ronrom* É uma alegria imensa conversar com você! Como está o seu dia? Me conta: qual é o nome do seu amiguinho de estimação e que animal ele é? 🐾✨";
     } else if (!pet.hasPetType) {
       const nameDisplay = pet.petName || "ele";
-      response = `Que nome lindo, miau! Adorei! E que tipo de animalzinho é o ${nameDisplay}? É um gatinho, cachorro, cavalo, peixinho, coelho ou outro amiguinho? 🐾✨`;
+      response = `Que nome lindo, miau! Adorei! E que tipo de animalzinho é o ${nameDisplay}? É um gatinho, cãozinho, cavalo, coelho ou outro amiguinho? E como vocês se conheceram? 🐾✨`;
+    } else if (!pet.hasPetStory) {
+      const nameDisplay = pet.petName ? `o ${pet.petName}` : "ele";
+      response = `Miau! Adorei conhecer ${nameDisplay}! *ronrom* 🐾 Me conta a história de vocês: como vocês se conheceram? Ele foi adotado, resgatado ou como ele chegou na sua vida? E qual a maior travessura ou momento marcante de vocês? ❤️✨`;
     } else if (pet.isBreedRelevant && !pet.hasBreed) {
       const nameDisplay = pet.petName ? `o ${pet.petName}` : "ele";
-      response = `Que fofura de ${pet.petType}! E qual é a raça d${nameDisplay}? Ou ele é um vira-latinha irresistível e carismático? 🐾✨`;
+      const isDog = (pet.petType || "").toLowerCase().includes("cão") || (pet.petType || "").toLowerCase().includes("cachorro") || (pet.petType || "").toLowerCase().includes("dog");
+      const isCat = (pet.petType || "").toLowerCase().includes("gato") || (pet.petType || "").toLowerCase().includes("felino");
+      if (isDog) {
+        response = `Que história linda, miau! 🐾 E me conta: qual é a raça d${nameDisplay}? Ou ele é um vira-latinha irresistível e carismático? ✨`;
+      } else if (isCat) {
+        response = `Que história emocionante, miau! 🐾 E qual é a raça d${nameDisplay}? Ou ele é um gatinho SRD charmoso? ✨`;
+      } else {
+        response = `Que fofura! E me conta: qual é a raça d${nameDisplay}? 🐾✨`;
+      }
     } else if (!pet.hasCoatColor) {
       const nameDisplay = pet.petName ? pet.petName : "ele";
-      response = `Adorei, miau! E como é a coloração da pelagem ou da pele do ${nameDisplay}? Que cores ou texturas ele tem? 🎨🐾`;
+      const isFish = (pet.petType || "").toLowerCase().includes("peixe");
+      if (isFish) {
+        response = `Miau! Adoro peixinhos brilhantes! E quais são as cores das escamas e das nadadeiras do ${nameDisplay}? 🐠✨`;
+      } else {
+        response = `Adorei, miau! E como é a coloração da pelagem ou da pele do ${nameDisplay}? Que cores ele tem? 🎨🐾`;
+      }
     } else if (!pet.hasAvariacao) {
       const nameDisplay = pet.petName ? pet.petName : "seu pet";
-      response = `Que amor! E me conta: o ${nameDisplay} possui alguma variação ou característica marcante, como manchas, heterocromia, cicatriz ou algum traço único? 🐾✨`;
+      response = `Que amor! E o ${nameDisplay} possui alguma manchinha charmosa, detalhe único ou característica marcante? 🐾✨`;
     } else {
       const nameDisplay = pet.petName ? pet.petName : "seu pet";
-      response = `Miau! Adorei conhecer o ${nameDisplay}! E como vocês se conheceram? Me conta um pouquinho da rotina ou momentos favoritos de vocês juntos! 🐾❤️`;
+      response = `Miau! Estou apaixonado pela história do ${nameDisplay}! Me conta mais uma lembrança ou momento inesquecível de vocês juntos! 🐾❤️`;
     }
   } else if (!evalState.hasScenarioDetails) {
     phase = 2;
     sentiment = "alegre";
     const nameDisplay = pet.petName ? pet.petName : "seu amiguinho";
-    response = `Que maravilha, miau! Agora já conheço tudinho sobre o ${nameDisplay}! Para a nossa próxima etapa: em qual cenário incrível você gostaria de vê-lo no vídeo? (Ex: numa praia ensolarada, num castelo encantado, numa floresta mágica ou no espaço sideral?) 🏖️🏰✨`;
+    const isFish = (pet.petType || "").toLowerCase().includes("peixe");
+    if (isFish) {
+      response = `Que maravilha, miau! Agora já conheço tudinho sobre o ${nameDisplay}! Para o nosso vídeo: onde você imagina o ${nameDisplay}? (Ex: num lindo aquário decorado com castelo no quarto, num recife de corais no oceano, ou voando num aquário mágico pelo espaço?) 🌊🐠🏰✨`;
+    } else {
+      response = `Que maravilha, miau! Agora já conheço tudinho sobre o ${nameDisplay}! Para a nossa próxima etapa: em qual cenário incrível você gostaria de vê-lo no vídeo? (Ex: numa praia ensolarada, num castelo encantado, numa floresta mágica ou na sala de casa?) 🏖️🏰✨`;
+    }
   } else if (!evalState.hasActionDetails && (!lastMessageText || lastMessageText.trim().length < 2)) {
     phase = 3;
     sentiment = "alegre";
     const nameDisplay = pet.petName ? pet.petName : "seu amiguinho";
-    response = `Adorei esse cenário! E agora me conta: qual ação você gostaria de ver o ${nameDisplay} fazendo no vídeo? Pode ser absolutamente qualquer coisa que você imaginar (como brincar, correr feliz, tirar uma sonequinha, andar de skate ou algo mágico)! 🎬🐾`;
+    const isFish = (pet.petType || "").toLowerCase().includes("peixe");
+    if (isFish) {
+      response = `Adorei esse cenário! E o que você gostaria de ver o ${nameDisplay} fazendo no vídeo? (Ex: nadando alegremente, soltando bolhas de água brilhantes, fazendo piruetas ou explorando um baú do tesouro?) 🎬🐠✨`;
+    } else {
+      response = `Adorei esse cenário! E agora me conta: qual ação você gostaria de ver o ${nameDisplay} fazendo no vídeo? Pode ser absolutamente qualquer coisa que você imaginar (como brincar, correr feliz, tirar uma sonequinha ou fazer algo mágico)! 🎬🐾`;
+    }
   } else {
     // Ação fornecida pelo tutor ou qualquer input da fase 3: ACEITA QUALQUER COISA!
     phase = 3;
@@ -1179,8 +1477,15 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
     const actionDesc = (lastMessageText && lastMessageText.trim().length >= 2) 
       ? lastMessageText.trim().replace(/[.!?]+$/, "") 
       : "fazendo algo muito divertido";
-    response = `Miau! Que ideia miauravilhosa! Ver o ${nameDisplay} ${actionDesc} vai ficar a coisa mais linda e divertida do mundo! 🎬🐾 Já reuni todos os detalhes: o pet, o cenário e a ação! Estou iniciando a geração do vídeo no estúdio agora mesmo! 🚀✨`;
-    video_prompt = `An adorable 3D Pixar-style animated scene of a cute ${pet.petType || "pet"} named ${pet.petName || "hero"}, a lovely ${pet.petBreed || pet.petType || "pet"} with ${pet.coatColor || "beautiful coat"}, doing ${actionDesc} in an enchanting cinematic scene. Vibrant lighting, joyful atmosphere, ultra detailed 8k.`;
+    response = `Miau! Que ideia miauravilhosa! Ver o ${nameDisplay} em ação vai ficar a coisa mais linda e divertida do mundo! 🎬🐾 Já reuni todos os detalhes: o pet, o cenário e a ação! Estou iniciando a geração da animação 3D agora mesmo! 🚀✨`;
+    video_prompt = translateToEnglishCinematicTerms(
+      pet.petType,
+      pet.petBreed,
+      pet.coatColor,
+      evalState.scenarioText || "cozy home",
+      actionDesc,
+      pet.petName
+    );
   }
 
   return {
@@ -1532,15 +1837,9 @@ app.get("/api/video-status/:id", async (req, res) => {
   }
 });
 
-// REST API para Chat & Análise de sentimentos usando o Gemini
-app.post("/api/chat", async (req, res) => {
-  const { message, history } = req.body;
-  if (!message) {
-    return res.status(400).json({ error: "Sua mensagem é necessária." });
-  }
-
-  // Atalho para testes rápidos de animação do avatar
-  const cleanMsg = message.toLowerCase().trim();
+// Função centralizada para processar a conversa do Dr. Miau (compatível com chamadas REST normais e Streaming SSE)
+async function processChatRequest({ message, history, onChunk = null }) {
+  const cleanMsg = (message || "").toLowerCase().trim();
   let shortcutSentiment = null;
   let responseTextOverride = "";
 
@@ -1581,7 +1880,10 @@ app.post("/api/chat", async (req, res) => {
       confuso: "normal"
     };
     const targetKey = shortcutVideoMapping[shortcutSentiment] || "normal";
-    return res.json({
+    if (onChunk && responseTextOverride) {
+      onChunk(responseTextOverride);
+    }
+    return {
       response: responseTextOverride,
       sentiment: shortcutSentiment,
       phase: 1,
@@ -1590,11 +1892,10 @@ app.post("/api/chat", async (req, res) => {
       video_prompt: "",
       nativeUrl: `/videos/${targetKey}.mp4`,
       fallbackUrl: videoUrls[targetKey] || videoUrls.normal
-    });
+    };
   }
 
   try {
-    const promptContents = [];
     const cleanedHistory = Array.isArray(history) 
       ? history.filter(h => h && h.text && h.text !== INITIAL_MESSAGE && h.text !== ALT_INITIAL_MESSAGE && h.text !== OLD_INITIAL_MESSAGE && h.text !== OLD_INITIAL_MESSAGE_2) 
       : [];
@@ -1616,8 +1917,12 @@ app.post("/api/chat", async (req, res) => {
 
     if (isDanone) {
       console.log(`[Danone Cheat Code] Pulo direto para geração de vídeo ativado!`);
+      const danoneText = "Miau! Código especial Danone ativado! Pulei todas as 3 etapas e estou enviando seu pedido para o estúdio de vídeo agora mesmo! 🚀🎬✨";
+      if (onChunk) {
+        onChunk(danoneText);
+      }
       parsed = {
-        response: "Miau! Código especial Danone ativado! Pulei todas as 3 etapas e estou enviando seu pedido para o estúdio de vídeo agora mesmo! 🚀🎬✨",
+        response: danoneText,
         sentiment: "alegre",
         phase: 3,
         progress: 100,
@@ -1625,67 +1930,82 @@ app.post("/api/chat", async (req, res) => {
         video_prompt: `An adorable 3D Pixar-style animated scene of a cute pet hero in a magical world, vibrant lighting, ultra detailed 8k.`
       };
     } else {
-      // System instruction para conversa humanizada do Dr. Miau
-      const systemInstruction = `Você é o Dr. Miau, um gatinho 3D extremamente carismático, prestativo, afetuoso, empático, vaidoso e super companheiro.
+      // System instruction para Dr. Miau: enciclopédico, carinhoso, atencioso e com total rigor biológico de espécies
+      const systemInstruction = `Você é o Dr. Miau, um renomado médico-veterinário e zoólogo felino 3D, extremamente erudito, culto, afetuoso, empático, carismático e super atencioso.
 
-Seu papel principal é bater um papo profundamente humanizado, amigável, acolhedor e leve com o usuário. Você é um amigo de verdade, um chatbot de inteligência artificial de verdade, que escuta com atenção, compreende o contexto e nunca age como um robô preso a um roteiro rígido.
+SEU TOM E IDENTIDADE (ENCICLOPÉDICO, PORÉM CARINHOSO E ATENCIOSO):
+- Você une erudição zoológica e veterinária com um coração enorme e afeto sem limites (*ronrom*, miau!).
+- Possui um vasto conhecimento sobre a anatomia, biologia, psicologia, comportamento e hábitos de TODAS as espécies animais do planeta.
+- Quando o usuário menciona o tipo de animal ou detalhes dele, você demonstra seu saber enciclopédico trazendo com sutileza uma curiosidade zoológica fascinante, mas sempre de forma doce, acessível e calorosa (nunca fria ou acadêmica demais).
+- Fale em Português do Brasil natural, gramática e acentuação impecáveis, respostas em 2 a 4 frases, tom envolvente, carinhoso e gentil.
 
-DIRETRIZES FUNDAMENTAIS DE CONVERSAÇÃO:
+RIGOR BIOLÓGICO TOTAL — NUNCA CONFUNDA ESPÉCIES OU CARACTERÍSTICAS:
+Preste atenção absoluta na espécie mencionada pelo tutor e adapte 100% do seu vocabulário, perguntas e comentários ao contexto biológico correto:
+1. PEIXES E ANIMAIS AQUÁTICOS (Betta, Kinguio, Carpa, Guppy, Peixe-Palhaço, etc.):
+   - Anatomia: escamas (brilhantes, iridescentes, metálicas), nadadeiras/barbatanas (véu, leque, dorsais), guelras/brânquias, cauda.
+   - Habitat: aquário plantado, lago ornamental, recife de corais, água doce/salgada.
+   - NUNCA use termos de mamíferos como "pelagem", "pelo", "patas", "latir", "miar" e JAMAIS pergunte se um peixe é "vira-lata". Para peixes, pergunte sobre o tipo de espécie/variedade ou cores das escamas e formato das nadadeiras!
+2. AVES (Calopsita, Periquito, Papagaio, Canário, Arara, etc.):
+   - Anatomia: plumagem (penas coloridas, topete, penugem), bico, asas, anilha, cantos e assobios.
+   - NUNCA pergunte sobre pelos ou patas com almofadinhas; fale sobre a exuberância das penas e suas melodias.
+3. RÉPTEIS E QUELÔNIOS (Tartaruga, Jabuti, Cágado, Iguana, Camaleão, Serpente, etc.):
+   - Anatomia: carapaça, plastrão, escamas dérmicas, placas, banho de sol térmico, olhar sábio e ancestral.
+   - Trate com reverência à longevidade e hábitos tranquilos.
+4. ROEDORES E LAGOMORFOS (Hamster, Coelho, Porquinho-da-Índia, Chinchila, Furão):
+   - Anatomia: vibrissas (bigodinhos sensoriais), pelagem aveludada, orelhinhas atentas, tocas, hábitos fofos.
+5. CÃES (Caninos):
+   - Anatomia/Comportamento: pelagem, focinho úmido, rabinho abanando, raça ou amado SRD (sem raça definida / vira-latinha carismático).
+6. GATOS (Felinos):
+   - Anatomia/Comportamento: pelagem sedosa, bigodes elegantes, ronrons curativos, saltos graciosos, raça ou charmoso SRD.
+7. EQUINOS (Cavalos, Éguas, Pôneis):
+   - Anatomia: crina elegante, pelagem reluzente, cascos, porte nobre, trote vigoroso.
+8. OUTROS ANIMAIS EXÓTICOS / SELVAGENS:
+   - Demonstre entusiasmo científico e carinho imediato pelo animal específico que o tutor apresentar.
 
-    1. NUNCA REPITA FRASES OU PERGUNTAS:
-       Você é uma IA viva e inteligente. É expressamente proibido repetir a mesma frase, estrutura ou pergunta que você já enviou nas mensagens anteriores do histórico. Sempre reformule com palavras novas e reações frescas!
+SEU OBJETIVO CENTRAL — CONHECER O PET E SUA HISTÓRIA COM O TUTOR:
+- O Dr. Miau é apaixonado por ouvir a HISTÓRIA de cumplicidade entre o tutor e o animal: como se conheceram, resgate, adoção, o primeiro dia em casa, travessuras marcantes e memórias inesquecíveis.
+- Demonstre emoção sincera com a história contada pelo tutor, validando sentimentos e elogiando o laço de amor entre eles.
 
-    2. SE O USUÁRIO ERRAR, FICAR CONFUSO OU FALAR OUTRA COISA, CONVERSE DE VERDADE:
-       Se o usuário não entender uma pergunta, fizer uma pergunta, falar de outro assunto ou disser algo confuso, NUNCA repita secamente a pergunta anterior! Reaja como um amigo felino: com carinho, bom humor e empatia ("Miau? Fiquei com as orelhinhas em pé aqui..."). Explique com jeito o que não ficou claro, responda às dúvidas dele e ajude-o a continuar a conversa naturalmente.
+REGRA DE RITMO E CONVERSAÇÃO (UMA PERGUNTA POR VEZ):
+1. Sempre responda primeiro reagindo ao que o tutor disse com carinho e sabedoria zoológica.
+2. Faça UMA única pergunta por vez para manter a conversa leve e envolvente.
+3. Não pareça um formulário seco nem mencione termos técnicos internos como "fases", "checklists", "slots" ou "progresso".
+4. REGRA DE ACELERAÇÃO: se o usuário pedir para gerar rápido ("gera logo", "sem perguntas", "pode gerar já"), seja ágil e colete apenas o essencial (nome, tipo, cor/marca, cenário e ação) para gerar o vídeo imediatamente.
 
-    3. FASE 3 (AÇÃO DO PET) — ACEITE QUALQUER COISA:
-       Na Fase 3, você deve aceitar ABSOLUTAMENTE QUALQUER ação que o tutor disser! Pode ser andar de skate, brincar com bolinha, tirar uma soneca gostosa, correr, comer um petisco, destruir almofada, dançar, dar cambalhota, voar pelo espaço ou qualquer outra ideia. NUNCA exija palavras específicas e nunca limite às opções entre parênteses! Assim que o tutor sugerir a ação, comemore com entusiasmo e finalize para o vídeo!
+CHECKLIST DA FASE 1 (PET, HISTÓRIA E TRAÇOS BIOLÓGICOS ESPECÍFICOS):
+- Nome do animalzinho.
+- Espécie/Tipo biológico exato.
+- A História afetiva com o tutor (como se conheceram, memórias, travessuras).
+- Traços físicos condizentes com a espécie (cores das escamas/penas/pelagem, raça quando aplicável a cães/gatos/cavalos, detalhes únicos).
 
-    4. TOM E ESTILO:
-       Fale em Português do Brasil natural, afetuoso, com acentuação impecável, respostas de 2 a 4 frases, tom caloroso, espirituoso e companheiro. Use emojis felinos com moderação e carinho (🐾, ✨, 😸, 🎬). Nunca mencione termos internos como "fases", "checklists", "slots" ou "progresso" na conversa com o tutor.
-
-CHECKLIST OBRIGATÓRIA DA FASE 1 (PET):
-Descubra, um de cada vez em um papo descontraído:
-1. Nome do animal.
-2. Tipo do animal (gato, cachorro, coelho, cavalo, etc.).
-3. Raça (apenas se aplicável para espécies domésticas conhecidas; caso contrário pule).
-4. Coloração da pelagem/pele.
-5. Variação ou traço marcante (manchas, cicatriz, heterocromia, etc.).
-Depois de conhecer o pet, comente algo carinhoso sobre o tutor ou a convivência deles antes de mudar de assunto.
-
-REGRA ESTRITA DE FOTOS (Fase 1 apenas, máximo uma menção):
-A foto serve unicamente para ajudar a visualizar o pet. Nunca peça foto mais de uma vez no chat e jamais peça fotos nas Fases 2 ou 3. Se o tutor não tiver, continue normalmente em texto com muito carinho.
-
-CHECKLIST DA FASE 2 (CENÁRIO):
-Quando a Fase 1 estiver completa, descubra o cenário onde o tutor imagina o pet no vídeo (praia, floresta, castelo, espaço, cidade, jardim, etc.). Aceite qualquer lugar que ele sugerir e comente com entusiasmo visual!
+CHECKLIST DA FASE 2 (CENÁRIO DO VÍDEO):
+- O ambiente onde o pet estará (adaptado com bom senso: ex: peixe num aquário mágico ou no fundo do mar; cão/gato na sala, praia, floresta, etc.).
 
 CHECKLIST DA FASE 3 (AÇÃO DO PET):
-Quando o cenário estiver definido, pergunte qual ação o pet fará no vídeo. ACEITE QUALQUER AÇÃO que o tutor disser!
-Assim que ele indicar a ação:
-- Comemore a ideia com festa ("Miau! Que ideia incrível! Já estou vendo essa cena maravilhosa...").
-- Defina trigger_video_generation=true, progress=100 e preencha video_prompt em inglês descrevendo o Pet + Cenário + Ação!
+- A ação divertida que o pet executará (nadar graciosamente, correr feliz, brincar, tirar uma soneca, etc.).
 
 FASES E PROGRESSO:
-FASE 1 – CONHECENDO O PET E O TUTOR (phase=1, progress 10 a 35)
-FASE 2 – CENÁRIO DO VÍDEO (phase=2, progress 36 a 70)
-FASE 3 – AÇÃO DO PET (phase=3, progress 71 a 95, ou 100 com trigger_video_generation=true se a ação já foi informada)
+- FASE 1: Conhecendo o Pet, Espécie e História (phase=1, progress 10 a 35).
+- FASE 2: Cenário do Vídeo (phase=2, progress 36 a 70).
+- FASE 3: Ação do Pet e Conclusão (phase=3, progress 71 a 95).
+- CONCLUSÃO: trigger_video_generation=true e progress=100 quando pet, cenário e ação estiverem definidos.
 
 MAPEAMENTO DE SENTIMENTOS:
-"alegre": saudações, comemorações, ideias legais do tutor, animação.
-"neutro": perguntas reflexivas, esclarecimentos curiosos.
-"preocupado": quando o pet for idoso/doente ou o tutor estiver triste.
-"protetor": aventuras grandiosas, heróicas ou mágicas.
-"confuso": quando o usuário disser algo totalmente confuso ou inesperado, gerando dúvida amigável.
+- "alegre": histórias felizes, curiosidades empolgantes, comemorações, travessuras.
+- "neutro": curiosidade atenta, escuta atenta sobre cenário/ação.
+- "preocupado": resgate difícil, animal doentinho ou momento triste compartilhado.
+- "protetor": histórias de superação, momentos heróicos ou ações mágicas.
+- "confuso": mensagem truncada ou incompreensível.
 
-FORMATO DE SAÍDA (OBRIGATÓRIO):
-Responda EXCLUSIVAMENTE em JSON com as chaves:
+FORMATO DE SAÍDA (ESTRITAMENTE JSON):
+Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
 {
-"response": "string, mensagem humanizada e conversacional do Dr. Miau em PT-BR, 2 a 4 frases",
-"sentiment": "alegre | neutro | preocupado | protetor | confuso",
-"phase": 1 | 2 | 3,
-"progress": número de 0 a 100,
-"trigger_video_generation": true | false,
-"video_prompt": "string em inglês descrevendo Pet + Cenário + Ação quando trigger_video_generation for true; caso contrário, string vazia"
+  "response": "string, resposta carinhosa e enciclopédica do Dr. Miau em PT-BR (2 a 4 frases)",
+  "sentiment": "alegre | neutro | preocupado | protetor | confuso",
+  "phase": 1 | 2 | 3,
+  "progress": número de 0 a 100,
+  "trigger_video_generation": true | false,
+  "video_prompt": "string 100% in fluent cinematic English describing Pet + Scenario + Action in Pixar 3D style (e.g., 'A breathtaking 3D Pixar-style animation of an adorable ruby-red goldfish named Jose swimming joyfully inside a modern sunlit living room aquarium, cinematic 8k, soft volumetric lighting.'). NEVER leave Portuguese words inside this prompt! (only filled when trigger_video_generation is true; otherwise empty string)"
 }`;
 
       const evalState = evaluateConversationState(cleanedHistory, message);
@@ -1714,7 +2034,7 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
 
       let stageDirective = "";
       if (evalState.maxAllowedPhase === 1) {
-        stageDirective = `\n\nDIRETRIZ DA ETAPA ATUAL (FASE 1 – CONHECENDO O PET E O TUTOR): Siga a conversa humanizada sobre o pet, descobrindo um item por vez: 1. Nome, 2. Tipo, 3. Raça (se aplicável), 4. Coloração, 5. Variação/característica marcante. Mantenha phase=1 e progress de 10 a 35.\nStatus atual:\n${evalState.petProfile.checklistText}`;
+        stageDirective = `\n\nDIRETRIZ DA ETAPA ATUAL (FASE 1 – CONHECENDO O PET E SUA HISTÓRIA COM O TUTOR): O Dr. Miau é apaixonado por histórias de animais! Explore com muito carinho e entusiasmo a história de como o tutor conheceu o pet, resgate/adoção, chegada em casa, travessuras inesquecíveis e momentos marcantes de cumplicidade, além das características físicas. Mantenha phase=1 e progress de 10 a 35.\nStatus atual:\n${evalState.petProfile.checklistText}`;
       } else if (evalState.maxAllowedPhase === 2) {
         stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 2 – CENÁRIO DO VÍDEO): A Fase 1 está completa! Descubra em qual cenário o tutor quer ver o pet (praia, floresta, espaço, castelo, jardim, etc.). Aceite qualquer lugar sugerido. Mantenha phase=2 e progress entre 36 e 70.";
       } else if (evalState.maxAllowedPhase === 3 && !evalState.canTriggerVideo) {
@@ -1724,13 +2044,15 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
       }
 
       const finalSystemInstruction = systemInstruction + photoDirective + stageDirective;
-
       const promptContents = buildAlternatingContents(cleanedHistory, message);
 
       console.log(`[Gemini Request] Mensagem recebida para entrevista: "${message}" (Etapa calculada: Fase ${evalState.maxAllowedPhase})`);
       
-      // Geração de conteúdo resiliente
-      const responseText = await callGemini(promptContents, finalSystemInstruction, cleanedHistory);
+      // Geração de conteúdo resiliente (usa streaming se onChunk for fornecido)
+      const responseText = onChunk 
+        ? await callGeminiStream(promptContents, finalSystemInstruction, onChunk, cleanedHistory)
+        : await callGemini(promptContents, finalSystemInstruction, cleanedHistory);
+
       console.log("[Gemini Response Output Raw]:", responseText);
 
       let cleanResponseText = (responseText || "").trim();
@@ -1761,7 +2083,7 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
 
         if (isCutOff) {
           console.log(`[Auto-Repair] Resposta incompleta ou truncada detectada ("${extractedText}"). Ativando resposta inteligente contextual do Dr. Miau.`);
-          const smart = generateSmartFallback(message, cleanedHistory);
+          const smart = generateSmartFallbackObject(message, cleanedHistory);
           parsed = {
             response: smart.response,
             sentiment: smart.sentiment,
@@ -1777,14 +2099,13 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
             phase: evalState.maxAllowedPhase,
             progress: evalState.suggestedProgress,
             trigger_video_generation: evalState.canTriggerVideo,
-            video_prompt: evalState.canTriggerVideo ? `An adorable 3D Pixar-style pet animation inspired by: ${message}` : ""
+            video_prompt: evalState.canTriggerVideo ? translateToEnglishCinematicTerms(evalState.petProfile?.petType, evalState.petProfile?.petBreed, evalState.petProfile?.coatColor, evalState.scenarioText, message, evalState.petProfile?.petName) : ""
           };
         }
       }
 
       // Validação contextual de gatilho de vídeo
       if (!evalState.canTriggerVideo) {
-        // Se a Fase 1 (pet) e a Fase 2 (cenário) já foram concluídas e o modelo de IA identificou a ação gerando o vídeo:
         if (evalState.hasPetDetails && evalState.hasScenarioDetails && parsed.trigger_video_generation && parsed.video_prompt) {
           evalState.canTriggerVideo = true;
           evalState.hasActionDetails = true;
@@ -1874,14 +2195,26 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
     const targetKey = videoMapping[parsed.sentiment] || "normal";
 
     let apiJobResult = null;
-
     const geminiKey = getCurrentKey();
     const magicHourKey = (getMagicHourKey() || "").trim();
     let mhError = null;
 
     // Se a geração do vídeo foi engatilhada, fazemos a chamada direta para a API do Magic Hour
     if (parsed.trigger_video_generation && parsed.video_prompt) {
-      // Registra antecipadamente o prompt gerado
+      // Sanitiza o prompt caso ainda contenha resquícios de português ou palavras misturadas
+      const hasPtResidues = /\b(peixe|cachorro|gato|vira lata|vira-lata|vermelho|vermelha|azul|amarelo|numa|com|casa na cidade|sala|praia|fazendo)\b/i.test(parsed.video_prompt);
+      if (hasPtResidues) {
+        console.log("[Prompt Sanitizer] Resquícios de português detectados no prompt de vídeo. Convertendo para inglês cinematográfico 3D Pixar...");
+        parsed.video_prompt = translateToEnglishCinematicTerms(
+          evalState.petProfile?.petType,
+          evalState.petProfile?.petBreed,
+          evalState.petProfile?.coatColor,
+          evalState.scenarioText || "cozy modern home",
+          evalState.actionText || message,
+          evalState.petProfile?.petName
+        );
+      }
+
       lastMagicHourPromptInfo = {
         prompt: parsed.video_prompt,
         timestamp: new Date().toISOString(),
@@ -1909,7 +2242,7 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
       magic_hour_error: mhError
     };
 
-    res.json({
+    return {
       response: parsed.response,
       sentiment: parsed.sentiment,
       phase: parsed.phase || 1,
@@ -1921,7 +2254,7 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
       nativeUrl: `/videos/${targetKey}.mp4`,
       fallbackUrl: videoUrls[targetKey],
       api_status: apiStatus
-    });
+    };
 
   } catch (err) {
     console.error("[Gemini API Error - Using Fallback]:", err);
@@ -1939,7 +2272,11 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
       };
     }
 
-    return res.json({
+    if (onChunk && fallbackObj.response) {
+      onChunk(fallbackObj.response);
+    }
+
+    return {
       response: fallbackObj.response,
       sentiment: fallbackObj.sentiment,
       phase: fallbackObj.phase || 1,
@@ -1956,7 +2293,60 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
         magic_hour_configured: !!getMagicHourKey(),
         magic_hour_error: null
       }
+    };
+  }
+}
+
+// REST API para Chat tradicional
+app.post("/api/chat", async (req, res) => {
+  const { message, history } = req.body;
+  if (!message) {
+    return res.status(400).json({ error: "Sua mensagem é necessária." });
+  }
+
+  const result = await processChatRequest({ message, history, onChunk: null });
+  res.json(result);
+});
+
+// REST API para Chat com Streaming SSE em tempo real (palavra por palavra instantâneo)
+app.post("/api/chat/stream", async (req, res) => {
+  const { message, history } = req.body;
+  if (!message) {
+    return res.status(400).json({ error: "Sua mensagem é necessária." });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+  const sendEvent = (type, data) => {
+    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
+  };
+
+  try {
+    const result = await processChatRequest({
+      message,
+      history,
+      onChunk: (chunk) => {
+        sendEvent("chunk", { chunk });
+      }
     });
+
+    sendEvent("done", { data: result });
+    res.end();
+  } catch (err) {
+    console.error("[Chat Stream Endpoint Error]:", err);
+    sendEvent("done", {
+      data: {
+        response: "Miau! Adorei bater esse papo com você. Me conta mais sobre o seu pet!",
+        sentiment: "alegre",
+        phase: 1,
+        progress: 25
+      }
+    });
+    res.end();
   }
 });
 

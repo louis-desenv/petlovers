@@ -1097,23 +1097,84 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
         text: m.text
       }));
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ message: fullMessageToAgent, history })
-    });
+    let data = null;
+    let streamedText = "";
+    let firstChunkReceived = false;
 
-    if (!res.ok) {
-      throw new Error(`Servidor indisponível (${res.status})`);
+    // Tenta primeiro via SSE Streaming em tempo real para latência quase zero
+    try {
+      const streamRes = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: fullMessageToAgent, history })
+      });
+
+      if (streamRes.ok && streamRes.body) {
+        const reader = streamRes.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let sseBuffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop(); // Mantém linha parcial incompleta
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith("data: ")) {
+              const jsonPayload = trimmedLine.slice(6).trim();
+              if (!jsonPayload) continue;
+
+              try {
+                const parsedSSE = JSON.parse(jsonPayload);
+                if (parsedSSE.type === "chunk" && parsedSSE.chunk) {
+                  if (!firstChunkReceived) {
+                    firstChunkReceived = true;
+                    showThinking(false);
+                    showSpeaking(true);
+                    setGenerating(false);
+                    setDockTitle("Dr. Miau respondendo...");
+                    playEmotionalVideo(getRandomVideoForEmotion("normal"));
+                  }
+                  streamedText += parsedSSE.chunk;
+                  setBubble(streamedText);
+                } else if (parsedSSE.type === "done" && parsedSSE.data) {
+                  data = parsedSSE.data;
+                }
+              } catch (parseErr) {
+                console.warn("[SSE Parse Warning]:", parseErr);
+              }
+            }
+          }
+        }
+      }
+    } catch (streamErr) {
+      console.warn("⚠️ Streaming SSE indisponível, recorrendo ao endpoint padrão:", streamErr);
     }
 
-    let data = await res.json().catch(() => null);
+    // Se o streaming não retornou os metadados finais, recorre ao endpoint POST padrão
+    if (!data) {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message: fullMessageToAgent, history })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Servidor indisponível (${res.status})`);
+      }
+
+      data = await res.json().catch(() => null);
+    }
 
     if (!data || typeof data.response !== "string" || !data.response.trim()) {
       data = {
-        response: "Miau! *ronrom* Adorei conversar com você! Me conta mais sobre seu amiguinho!",
+        response: streamedText.trim() || "Miau! *ronrom* Adorei conversar com você! Me conta mais sobre seu amiguinho!",
         sentiment: "alegre",
         phase: state.currentPhase || 1,
         progress: state.progress || 20
