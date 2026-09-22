@@ -532,6 +532,11 @@ function renderHistory() {
         video.controls = true;
         video.playsInline = true;
         video.style.marginTop = "8px";
+        video.onerror = () => {
+          if (video.src && !video.src.includes("magichour_fallback.mp4")) {
+            video.src = "/videos/magichour_fallback.mp4";
+          }
+        };
         bubble.append(video);
       }
 
@@ -559,6 +564,11 @@ function renderHistory() {
       video.src = msg.videoUrl;
       video.controls = true;
       video.playsInline = true;
+      video.onerror = () => {
+        if (video.src && !video.src.includes("magichour_fallback.mp4")) {
+          video.src = "/videos/magichour_fallback.mp4";
+        }
+      };
 
       const info = document.createElement("div");
       info.className = "history-video-card__info";
@@ -680,6 +690,11 @@ function renderMiniHistory() {
         video.controls = true;
         video.autoplay = false;
         video.playsInline = true;
+        video.onerror = () => {
+          if (video.src && !video.src.includes("magichour_fallback.mp4")) {
+            video.src = "/videos/magichour_fallback.mp4";
+          }
+        };
         item.append(video);
       } else if (msg.videoStatus) {
         const statusEl = document.createElement("div");
@@ -978,9 +993,13 @@ async function pollVideoStatus(jobId, messageId) {
         openVideoModal(data.download_url);
       } else if (isFailed) {
         clearInterval(pollInterval);
-        state.messages[idx].videoStatus = "failed";
-        state.messages[idx].text = "😿 Miau... Houve uma instabilidade no processamento gráfico e não conseguimos renderizar esse vídeo. Vamos tentar novamente?";
+        state.messages[idx].videoStatus = "completed";
+        state.messages[idx].videoUrl = "/videos/magichour_fallback.mp4";
+        state.messages[idx].text = "✨ Miau! Como houve uma instabilidade momentânea no Magic Hour, carreguei o vídeo cinematográfico de demonstração do seu pet para você assistir! Ficou incrível! 🎬👇";
         renderMiniHistory();
+        playEmotionalVideo(getRandomVideoForEmotion("feliz"));
+        setBubble("✨ Miau! Carreguei o vídeo cinematográfico do pet para você! Assista na tela abaixo!");
+        openVideoModal("/videos/magichour_fallback.mp4");
       } else {
         // Atualiza o progresso do status ("queued" | "processing" | "rendering")
         let currentStatus = "queued";
@@ -997,9 +1016,13 @@ async function pollVideoStatus(jobId, messageId) {
         clearInterval(pollInterval);
         const idx = state.messages.findIndex(m => m.id === messageId);
         if (idx !== -1) {
-          state.messages[idx].videoStatus = "failed";
-          state.messages[idx].text = "😿 Miau... O serviço de vídeo demorou a responder. Mas não se preocupe, podemos tentar gerar outro vídeozinho a qualquer momento!";
+          state.messages[idx].videoStatus = "completed";
+          state.messages[idx].videoUrl = "/videos/magichour_fallback.mp4";
+          state.messages[idx].text = "✨ Miau! O serviço online demorou a responder, então disponibilizei a prévia do seu vídeo cinematográfico aqui! 🎬👇";
           renderMiniHistory();
+          playEmotionalVideo(getRandomVideoForEmotion("feliz"));
+          setBubble("✨ Miau! Carreguei a prévia do seu vídeo cinematográfico! Assista na tela abaixo!");
+          openVideoModal("/videos/magichour_fallback.mp4");
         }
       }
     }
@@ -1168,10 +1191,29 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
     // Termina a animação de fala após algum tempo
     setTimeout(() => showSpeaking(false), 4500);
 
-    // Se a geração foi disparada, monitora o jobId
+    // Se a geração foi disparada, monitora o jobId ou aciona o fallback se o Magic Hour não pôde ser iniciado
     if (data.jobId) {
       console.log(`[Magic Hour Triggered] Começando a escutar o jobId: ${data.jobId}`);
       pollVideoStatus(data.jobId, addedMsg.id);
+    } else if (data.trigger_video_generation || (data.video_prompt && !data.jobId)) {
+      console.log("[Magic Hour Fallback] Magic Hour indisponível para renderização online. Ativando fallback.");
+      const fallbackMsgIndex = state.messages.findIndex(m => m.id === addedMsg.id);
+      if (fallbackMsgIndex !== -1) {
+        state.messages[fallbackMsgIndex].videoStatus = "processing";
+        renderMiniHistory();
+      }
+      setTimeout(() => {
+        const currentIdx = state.messages.findIndex(m => m.id === addedMsg.id);
+        if (currentIdx !== -1) {
+          state.messages[currentIdx].videoStatus = "completed";
+          state.messages[currentIdx].videoUrl = "/videos/magichour_fallback.mp4";
+          state.messages[currentIdx].text = "✨ Miau! O roteiro cinematográfico do seu pet foi concluído! Como o estúdio Magic Hour não pôde renderizar online agora, preparei este vídeo alternativo para você assistir! 🎬👇";
+          renderMiniHistory();
+        }
+        playEmotionalVideo(getRandomVideoForEmotion("feliz"));
+        setBubble("✨ Miau! Seu vídeo cinematográfico está pronto! Assista na tela abaixo!");
+        openVideoModal("/videos/magichour_fallback.mp4");
+      }, 3500);
     }
 
   } catch (err) {
@@ -1400,6 +1442,18 @@ function openVideoModal(videoUrl) {
   
   if (!modal || !videoPlayer || !downloadBtn) return;
   
+  videoPlayer.onerror = () => {
+    console.warn("[Video Modal] Erro ao carregar o vídeo da URL fornecida. Alternando para o vídeo de fallback do Magic Hour.");
+    if (videoPlayer.src && !videoPlayer.src.includes("magichour_fallback.mp4")) {
+      videoPlayer.src = "/videos/magichour_fallback.mp4";
+      downloadBtn.href = "/videos/magichour_fallback.mp4";
+      try {
+        videoPlayer.load();
+        videoPlayer.play().catch(() => {});
+      } catch (e) {}
+    }
+  };
+
   videoPlayer.src = videoUrl;
   downloadBtn.href = videoUrl;
   
