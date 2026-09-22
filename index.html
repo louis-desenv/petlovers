@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agentpet mumu</title>
+    <meta name="description" content="Agente virtual Dr. Miau para bate-papo, cuidados e criação de vídeos animados do seu pet." />
+    <meta property="og:title" content="agentpet mumu" />
+    <meta property="og:description" content="Agente virtual Dr. Miau para bate-papo, cuidados e criação de vídeos animados do seu pet." />
+    <script>
+      try {
+        let _fetch = window.fetch ? window.fetch.bind(window) : null;
+        Object.defineProperty(window, 'fetch', {
+          get() { return _fetch; },
+          set(fn) { _fetch = fn; },
+          configurable: true,
+          enumerable: true
+        });
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agentpet mumu</title>
+  <meta name="description" content="Agente virtual Dr. Miau para bate-papo, cuidados e criação de vídeos animados do seu pet." />
+  <meta property="og:title" content="agentpet mumu" />
+  <meta property="og:description" content="Agente virtual Dr. Miau para bate-papo, cuidados e criação de vídeos animados do seu pet." />
+  <script>
+    // Polyfill defensivo: permite que scripts de telemetria ou extensões atribuam window.fetch com segurança
+    try {
+      let _fetch = window.fetch ? window.fetch.bind(window) : null;
+      Object.defineProperty(window, 'fetch', {
+        get() { return _fetch; },
+        set(fn) { _fetch = fn; },
+        configurable: true,
+        enumerable: true
+      });
+    } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300..700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a href="#main-chat" class="skip-link">Pular para o chat</a>
+
+  <!-- ── Navegação ── -->
+  <nav class="app-nav" aria-label="Navegação principal">
+    <div class="app-nav__left">
+      <a class="nav-icon nav-logo" href="#" aria-label="Voltar para a Home" title="Voltar para a Home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <!-- House structure -->
+          <path d="M3 10l9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V10z" />
+          <!-- Cat Ears on top of the roof -->
+          <path d="M6 7.5L4 3.5l4 2" />
+          <path d="M18 7.5L20 3.5l-4 2" />
+          <!-- Cute cat face details inside -->
+          <circle cx="9" cy="14" r="1" fill="currentColor" />
+          <circle cx="15" cy="14" r="1" fill="currentColor" />
+          <path d="M11.5 16.5c0.5 0.3 1 0.3 1.5 0" />
+        </svg>
+      </a>
+      <button class="nav-icon" data-action="toggleHelp" aria-label="Ajuda" aria-expanded="false" aria-controls="helpPopover">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
+    </div>
+
+    <a class="app-nav__brand" href="#" aria-label="Pet Agent — Dr. Miau">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      <span>Pet Agent</span>
+    </a>
+
+    <div class="app-nav__right">
+      <button class="profile-btn" data-action="toggleProfile" aria-label="Perfil">M</button>
+    </div>
+  </nav>
+
+  <!-- Botão de Trocar Chat (Em cima na direita, embaixo da bolinha do perfil) -->
+  <button
+    class="top-layout-switch-btn"
+    id="toggleLayoutBtn"
+    data-action="toggleLayout"
+    aria-label="Alternar modo de chat (Lado a Lado / Empilhado)"
+    title="Alternar Modo: Dr. Miau na esquerda, Chat na direita"
+  >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+      <line x1="12" y1="3" x2="12" y2="21"></line>
+    </svg>
+    <span id="toggleLayoutText">Trocar Chat</span>
+  </button>
+
+  <!-- ── App ── -->
+  <div class="app">
+    <div class="experience">
+
+      <!-- Container do Palco e Progresso -->
+      <div class="stage-container">
+        <!-- Barra de progresso vertical à esquerda -->
+        <div class="progress" aria-label="Progresso da conversa">
+          <div class="progress__row">
+            <svg class="paw-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <ellipse cx="12" cy="17" rx="5" ry="3.5"/>
+              <ellipse cx="7" cy="12" rx="2" ry="2.5"/>
+              <ellipse cx="17" cy="12" rx="2" ry="2.5"/>
+              <ellipse cx="9.5" cy="8.5" rx="1.5" ry="2"/>
+              <ellipse cx="14.5" cy="8.5" rx="1.5" ry="2"/>
+            </svg>
+            <div class="progress__track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+              <span data-ui="progressBar" style="height:0%"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Palco -->
+        <div class="stage" aria-label="Área do personagem Dr. Miau">
+          <div class="stage__bg" aria-hidden="true"></div>
+          <div class="stage__vignette" aria-hidden="true"></div>
+
+          <!-- Personagem Dr. Miau -->
+          <div class="agent-wrap" data-ui="agentWrap" id="agentWrap">
+            <!-- Balão de fala -->
+            <div class="agent-bubble" role="status" aria-live="polite" aria-label="Fala do Dr. Miau">
+              <p data-ui="bubbleText">Olá! Sou o Dr. Miau! 🐾 Que alegria falar com você! Fique à vontade para bater um papo!</p>
+            </div>
+
+            <img
+              id="dr-miau-img"
+              src="dr-miau.png"
+              alt="Dr. Miau, agente de pets"
+              class="dr-miau-character"
+              draggable="false"
+            />
+            <video
+              id="magic-hour-video-a"
+              class="dr-miau-video hidden"
+              autoplay
+              muted
+              playsinline
+              aria-label="Animação do Dr. Miau - Buffer A"
+            ></video>
+            <video
+              id="magic-hour-video-b"
+              class="dr-miau-video hidden"
+              autoplay
+              muted
+              playsinline
+              aria-label="Animação do Dr. Miau - Buffer B"
+            ></video>
+            <div class="thinking-indicator hidden" id="thinkingIndicator" aria-live="polite" aria-label="Dr. Miau está pensando">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat" id="main-chat">
+        <div class="chat__toolbar">
+          <div class="chat__toolbar-left">
+            <button class="tool-btn" data-action="toggleHistory" aria-expanded="false" aria-controls="historyPopover" title="Histórico">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </button>
+
+            <button class="tool-btn" data-action="toggleMiniHistory" aria-label="Alternar visualização das mensagens recentes" title="Ocultar/Mostrar recentes">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" width="18" height="18">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+              </svg>
+              <span id="mini-history-btn-text" style="display: none;">Ocultar</span>
+            </button>
+
+            <button class="tool-btn tool-btn--reset" data-action="resetChat" aria-label="Reiniciar conversa" title="Nova Conversa">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+            </button>
+
+            <button class="tool-btn tool-btn--retry" id="retryLastBtn" data-action="retryLast" aria-label="Repetir última instrução" title="Repetir última instrução (Tentar novamente)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+            </button>
+
+            <button class="tool-btn tool-btn--prompt" id="viewPromptBtn" aria-label="Ver Prompt Final Gerado para o Magic Hour" title="Ver Prompt Final (Magic Hour)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+            </button>
+
+            <p class="status" data-ui="dockTitle" aria-live="polite">Pronto para conversar</p>
+          </div>
+
+          <div class="mode" role="tablist" aria-label="Modo de entrada">
+            <button class="mode__btn" role="tab" data-action="setMode" data-mode="text" aria-selected="true">Texto</button>
+            <button class="mode__btn" role="tab" data-action="setMode" data-mode="audio" aria-selected="false">Voz</button>
+          </div>
+        </div>
+
+        <!-- Prévia discreta e atraente da foto selecionada dentro do chat -->
+        <div id="imagePreviewContainer" class="photo-preview-tray hidden" role="region" aria-label="Prévia da foto do pet selecionada">
+          <div class="photo-preview-tray__content">
+            <div class="photo-preview-tray__thumb-wrapper">
+              <img id="imagePreviewImg" class="photo-preview-tray__thumb" src="" alt="Prévia da foto do pet" />
+            </div>
+            <div class="photo-preview-tray__info">
+              <span class="photo-preview-tray__title">Foto do pet selecionada</span>
+              <span class="photo-preview-tray__subtitle">Pronta para dar contexto visual ao Dr. Miau</span>
+            </div>
+          </div>
+          <div class="photo-preview-tray__actions">
+            <button type="button" id="cancelPhotoBtn" class="photo-btn photo-btn--cancel" title="Cancelar foto">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+              <span>Cancelar</span>
+            </button>
+            <button type="button" id="confirmPhotoSendBtn" class="photo-btn photo-btn--confirm" title="Confirmar e enviar foto">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <span>Confirmar Envio</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Composer de entrada na base -->
+        <form class="composer" data-ui="composer" aria-label="Enviar mensagem">
+          <input
+            type="text"
+            class="composer__input"
+            placeholder="Fale sobre o seu pet…"
+            aria-label="Digite sua mensagem"
+            autocomplete="off"
+            spellcheck="true"
+          />
+          <!-- Botão Discreto de Anexo de Foto -->
+          <input type="file" id="imageFileInput" accept="image/*" style="display: none;" />
+          <button
+            type="button"
+            class="composer__image-btn"
+            id="imageAttachBtn"
+            title="Anexar foto do pet (opcional)"
+            aria-label="Anexar foto do pet"
+          >
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="3" ry="3"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+          </button>
+
+          <button class="composer__send" type="submit" aria-label="Enviar" disabled aria-disabled="true">
+            <svg class="send-icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <svg class="send-spinner hidden" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3">
+              <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.2)"></circle>
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"></circle>
+            </svg>
+          </button>
+          <button
+            class="composer__voice"
+            type="button"
+            data-action="toggleListening"
+            data-state="idle"
+            aria-label="Toque para falar"
+          >
+            <div class="voice-line" aria-hidden="true"></div>
+            <div class="voice-center">
+              <div class="voice-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                <div class="mic__ring" aria-hidden="true"></div>
+              </div>
+              <span class="voice-label" data-ui="voiceLabel"></span>
+            </div>
+            <div class="voice-line" aria-hidden="true"></div>
+          </button>
+        </form>
+
+        <!-- Histórico scrollable central no estilo WhatsApp (movido para baixo do composer) -->
+        <div class="mini-history" id="mini-history" data-ui="miniHistory"></div>
+
+        <!-- Histórico -->
+        <div class="history" data-ui="historyPopover" id="historyPopover" role="dialog" aria-modal="true" aria-label="Histórico de conversa" hidden>
+          <div class="history__header">
+            <h2>Histórico</h2>
+            <button class="history__close" data-action="toggleHistory" aria-label="Fechar histórico">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <!-- Abas para alternar entre Mensagens e Vídeos Prontos -->
+          <div class="history__tabs" role="tablist">
+            <button class="history-tab active" data-tab="messages" role="tab" aria-selected="true">Mensagens</button>
+            <button class="history-tab" data-tab="videos" role="tab" aria-selected="false">Vídeos Prontos</button>
+          </div>
+          <div class="history__list" data-ui="historyList" role="list" aria-label="Mensagens"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Modal de Apresentação de Vídeo -->
+  <div class="video-modal-backdrop hidden" id="videoModalBackdrop">
+    <div class="video-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="video-modal__header">
+        <h2 id="modalTitle">🎬 Seu Vídeo do Pet está Pronto!</h2>
+        <button class="video-modal__close" id="closeVideoModal" aria-label="Fechar modal">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="video-modal__body">
+        <video id="modalVideoPlayer" controls playsinline loop></video>
+      </div>
+      <div class="video-modal__footer">
+        <a id="downloadVideoBtn" href="#" download="pet_video_cinematico.mp4" class="modal-btn modal-btn--download" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 6px; display: inline-block; vertical-align: middle;">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Baixar Vídeo
+        </a>
+        <button id="viewPromptFromVideoModalBtn" class="modal-btn modal-btn--prompt-video" title="Ver prompt do Magic Hour usado neste vídeo">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 6px; display: inline-block; vertical-align: middle;">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          Ver Prompt Final
+        </button>
+        <button id="closeVideoModalBtn" class="modal-btn modal-btn--close">
+          Fechar e Continuar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal do Prompt Final Gerado (Magic Hour) -->
+  <div class="prompt-modal-backdrop hidden" id="promptModalBackdrop">
+    <div class="prompt-modal" role="dialog" aria-modal="true" aria-labelledby="promptModalTitle">
+      <div class="prompt-modal__header">
+        <div class="prompt-modal__header-title">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <h2 id="promptModalTitle">Prompt Final (Magic Hour)</h2>
+        </div>
+        <button class="prompt-modal__close" id="closePromptModalBtn" aria-label="Fechar modal de prompt">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="prompt-modal__body">
+        <p class="prompt-modal__desc">
+          Este é o prompt exato construído e enviado para a API do <strong>Magic Hour</strong> (Text-to-Video) na geração cinematográfica do pet. Você pode copiá-lo e inspecioná-lo para seus testes.
+        </p>
+
+        <div class="prompt-modal__meta" id="promptModalMeta">
+          <span class="prompt-modal__meta-item" id="promptMetaTime">Aguardando geração...</span>
+          <span class="prompt-modal__meta-item" id="promptMetaJob"></span>
+        </div>
+
+        <div class="prompt-modal__content-box">
+          <pre id="promptModalText" class="prompt-modal__text">Nenhum prompt foi gerado ainda nesta sessão. Complete o atendimento ou envie uma foto do pet para que o Dr. Miau elabore o vídeo cinematográfico.</pre>
+        </div>
+      </div>
+      <div class="prompt-modal__footer">
+        <button id="copyPromptBtn" class="modal-btn modal-btn--copy">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 6px;">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span id="copyPromptBtnText">Copiar Prompt</span>
+        </button>
+        <button id="refreshPromptBtn" class="modal-btn modal-btn--secondary" title="Recarregar do Servidor">
+          Atualizar
+        </button>
+        <button id="closePromptModalFooterBtn" class="modal-btn modal-btn--confirm">
+          Fechar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Painel de ajuda -->
+  <div class="help" data-ui="helpPopover" id="helpPopover" role="dialog" aria-modal="true" aria-label="Ajuda" hidden>
+    <div class="help__header">
+      <h2>Como usar</h2>
+      <button class="help__close" data-action="toggleHelp" aria-label="Fechar ajuda">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <ul class="help__list">
+      <li>Digite no campo de texto e envie para conversar com o Dr. Miau.</li>
+      <li>Use o modo <strong>Voz</strong> para falar diretamente com o microfone.</li>
+      <li>O Dr. Miau interpreta seus sentimentos em tempo real e muda suas expressões faciais instantaneamente!</li>
+      <li>Você verá reações alegres, neutras, preocupadas ou protetoras conforme o assunto da conversa.</li>
+      <li>O Dr. Miau não faz diagnósticos médicos. Para sintomas graves, consulte um veterinário.</li>
+    </ul>
+  </div>
+
+  <!-- Menu Suspenso de Perfil (Dropdown Estilo YouTube) -->
+  <div id="profileDropdown" class="profile-dropdown hidden">
+    <!-- Painel Principal (Lista de Opções) -->
+    <div class="dropdown-panel" id="panel-main">
+      <div class="dropdown-user-header">
+        <div class="dropdown-avatar">A</div>
+        <div class="dropdown-user-meta">
+          <span class="dropdown-user-name">Alexandre Miau</span>
+          <span class="dropdown-user-handle">@alex_miau</span>
+          <button class="dropdown-view-profile-btn" data-panel-target="perfil">Visualizar perfil</button>
+        </div>
+      </div>
+      
+      <div class="dropdown-divider"></div>
+      
+      <div class="dropdown-menu-list">
+        <button class="dropdown-item" data-panel-target="perfil">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="dropdown-text">Perfil</span>
+          <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <button class="dropdown-item" data-panel-target="plano">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+          <span class="dropdown-text">Plano Atual</span>
+          <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <button class="dropdown-item" data-panel-target="aparencia">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>
+          <span class="dropdown-text">Aparência</span>
+          <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <button class="dropdown-item" data-panel-target="config">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="dropdown-text">Configurações</span>
+          <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <div class="dropdown-divider"></div>
+
+        <button class="dropdown-item" data-panel-target="feedback">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="dropdown-text">Enviar Feedback</span>
+          <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Painel: Perfil -->
+    <div class="dropdown-panel hidden" id="panel-perfil">
+      <div class="panel-header">
+        <button class="panel-back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <span class="panel-title">Seu Perfil</span>
+      </div>
+      <div class="panel-body">
+        <div class="user-brief-card">
+          <div class="user-brief-avatar">A</div>
+          <div class="user-brief-info">
+            <span class="user-brief-name">Alexandre Miau</span>
+            <span class="user-brief-email">alexandre.miau@gmail.com</span>
+            <span class="user-brief-role">Tutor de Pets</span>
+          </div>
+        </div>
+        <div class="user-brief-details">
+          <div class="brief-row">
+            <span class="brief-label">Status:</span>
+            <span class="brief-value text-success">✔ Verificado</span>
+          </div>
+          <div class="brief-row">
+            <span class="brief-label">Desde:</span>
+            <span class="brief-value">Julho de 2026</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Plano -->
+    <div class="dropdown-panel hidden" id="panel-plano">
+      <div class="panel-header">
+        <button class="panel-back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <span class="panel-title">Plano Atual</span>
+      </div>
+      <div class="panel-body">
+        <div class="brief-plan-card">
+          <div class="brief-plan-header">
+            <span class="brief-plan-badge">Premium</span>
+            <h4>Plano Super Miau</h4>
+          </div>
+          <p class="brief-plan-desc">Acesso ilimitado às respostas comportamentais, expressões completas e suporte premium.</p>
+          <div class="brief-plan-meta">
+            <div class="brief-row">
+              <span class="brief-label">Valor:</span>
+              <span class="brief-value">R$ 29,90 / mês</span>
+            </div>
+            <div class="brief-row">
+              <span class="brief-label">Renovação:</span>
+              <span class="brief-value">08/08/2026</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Aparência -->
+    <div class="dropdown-panel hidden" id="panel-aparencia">
+      <div class="panel-header">
+        <button class="panel-back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <span class="panel-title">Aparência</span>
+      </div>
+      <div class="panel-body">
+        <p class="panel-intro-text">Altere a cor de destaque do seu portal:</p>
+        <div class="color-picker-grid">
+          <button class="color-option active" data-color="peach" title="Pêssego">
+            <span class="color-dot" style="background-color: #efb577;"></span>
+            <span class="color-label">Pêssego</span>
+          </button>
+          <button class="color-option" data-color="emerald" title="Esmeralda">
+            <span class="color-dot" style="background-color: #10b981;"></span>
+            <span class="color-label">Esmeralda</span>
+          </button>
+          <button class="color-option" data-color="ocean" title="Oceano">
+            <span class="color-dot" style="background-color: #0ea5e9;"></span>
+            <span class="color-label">Oceano</span>
+          </button>
+          <button class="color-option" data-color="purple" title="Púrpura">
+            <span class="color-dot" style="background-color: #a855f7;"></span>
+            <span class="color-label">Púrpura</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Configurações -->
+    <div class="dropdown-panel hidden" id="panel-config">
+      <div class="panel-header">
+        <button class="panel-back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <span class="panel-title">Configurações</span>
+      </div>
+      <div class="panel-body" style="padding: 12px 16px;">
+        <div class="brief-settings-list">
+          <label class="brief-setting-row">
+            <div class="brief-setting-info">
+              <span class="setting-title">Sons e Miados</span>
+              <span class="setting-desc">Efeitos sonoros nas respostas</span>
+            </div>
+            <input type="checkbox" id="toggleSoundEffects" checked class="brief-switch" />
+          </label>
+          <label class="brief-setting-row">
+            <div class="brief-setting-info">
+              <span class="setting-title">Auto-rolagem</span>
+              <span class="setting-desc">Rolar chat até o final</span>
+            </div>
+            <input type="checkbox" id="toggleAutoscroll" checked class="brief-switch" />
+          </label>
+          <label class="brief-setting-row">
+            <div class="brief-setting-info">
+              <span class="setting-title">Salvar Histórico</span>
+              <span class="setting-desc">Salvar conversas locais</span>
+            </div>
+            <input type="checkbox" id="toggleHistorySave" checked class="brief-switch" />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Feedback -->
+    <div class="dropdown-panel hidden" id="panel-feedback">
+      <div class="panel-header">
+        <button class="panel-back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <span class="panel-title">Enviar Feedback</span>
+      </div>
+      <div class="panel-body">
+        <div class="feedback-box">
+          <textarea class="brief-feedback-textarea" id="feedbackText" placeholder="O que você está achando do Dr. Miau? Escreva aqui..."></textarea>
+          <button id="sendFeedbackBtn" class="brief-feedback-submit">Enviar Comentário</button>
+          <p id="feedbackSuccess" class="feedback-success hidden">✔ Comentário enviado! Obrigado.</p>
+        </div>
+      </div>
+    </div>
+    <!-- Modal de Diagnóstico e Status das APIs -->
+    <div class="api-modal-backdrop hidden" id="apiModalBackdrop">
+      <div class="api-modal">
+        <div class="api-modal__header">
+          <h3>⚡ Diagnóstico de Conexão das APIs</h3>
+          <button class="api-modal__close" id="closeApiModalBtn" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="api-modal__body">
+          <p class="api-modal__intro">
+            Verifique abaixo se o servidor Vercel está conectado com as APIs de IA (Gemini) e Geração de Vídeo (Magic Hour).
+          </p>
+
+          <div class="api-card" id="geminiApiCard">
+            <div class="api-card__header">
+              <div class="api-card__title">
+                <span class="api-card__dot" id="geminiCardDot"></span>
+                <strong>Google Gemini API</strong> (Inteligência do Dr. Miau)
+              </div>
+              <span class="api-card__badge" id="geminiCardBadge">Verificando...</span>
+            </div>
+            <p class="api-card__msg" id="geminiCardMsg">Testando conexão com o servidor...</p>
+          </div>
+
+          <div class="api-card" id="magicHourApiCard">
+            <div class="api-card__header">
+              <div class="api-card__title">
+                <span class="api-card__dot" id="magicHourCardDot"></span>
+                <strong>Magic Hour API</strong> (Estúdio de Vídeo 3D)
+              </div>
+              <span class="api-card__badge" id="magicHourCardBadge">Verificando...</span>
+            </div>
+            <p class="api-card__msg" id="magicHourCardMsg">Testando conexão com o servidor...</p>
+          </div>
+
+          <div class="api-modal__help">
+            <h4>💡 Como Resolver Erros de Conexão no Vercel:</h4>
+            <ol>
+              <li>Acesse o painel do seu projeto no <strong>Vercel</strong> (vercel.com).</li>
+              <li>Vá em <strong>Settings &gt; Environment Variables</strong>.</li>
+              <li>Adicione a variável <code>GEMINI_API_KEY</code> com sua chave do Google AI Studio.</li>
+              <li>Adicione a variável <code>MAGIC_HOUR_API_KEY</code> com sua chave do Magic Hour.</li>
+              <li>Faça um novo <strong>Redeploy</strong> da aplicação no Vercel para carregar as novas chaves!</li>
+            </ol>
+          </div>
+        </div>
+        <div class="api-modal__footer">
+          <button class="api-modal__refresh" id="refreshApiStatusBtn">🔄 Re-testar Conexões</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
