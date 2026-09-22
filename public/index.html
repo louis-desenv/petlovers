@@ -593,7 +593,7 @@
         </div>
         <div class="api-modal__body">
           <p class="api-modal__intro">
-            Verifique abaixo se o servidor Vercel está conectado com as APIs de IA (Gemini) e Geração de Vídeo (Magic Hour).
+            Verifique abaixo se o servidor (Railway, Vercel ou Local) está conectado com as APIs de IA (Gemini) e Geração de Vídeo (Magic Hour).
           </p>
 
           <div class="api-card" id="geminiApiCard">
@@ -619,13 +619,16 @@
           </div>
 
           <div class="api-modal__help">
-            <h4>💡 Como Resolver Erros de Conexão no Vercel:</h4>
+            <h4>💡 Como Configurar as Chaves no Railway:</h4>
             <ol>
-              <li>Acesse o painel do seu projeto no <strong>Vercel</strong> (vercel.com).</li>
-              <li>Vá em <strong>Settings &gt; Environment Variables</strong>.</li>
-              <li>Adicione a variável <code>GEMINI_API_KEY</code> com sua chave do Google AI Studio.</li>
-              <li>Adicione a variável <code>MAGIC_HOUR_API_KEY</code> com sua chave do Magic Hour.</li>
-              <li>Faça um novo <strong>Redeploy</strong> da aplicação no Vercel para carregar as novas chaves!</li>
+              <li>Acesse o painel do seu projeto no <strong>Railway</strong> (railway.com).</li>
+              <li>Clique no seu <strong>Serviço</strong> (sua aplicação).</li>
+              <li>Acesse a aba <strong>Variables</strong> (Variáveis de Ambiente).</li>
+              <li>Clique em <strong>+ New Variable</strong> e adicione:
+                <br />• Nome: <code>GEMINI_API_KEY</code> &nbsp;|&nbsp; Valor: <em>Sua chave da Google Gemini API (ex: AIzaSy...)</em>
+                <br />• Nome: <code>MAGIC_HOUR_API_KEY</code> &nbsp;|&nbsp; Valor: <em>Sua chave do Magic Hour (opcional)</em>
+              </li>
+              <li>A Railway fará o <strong>Deploy automático</strong> em poucos segundos com a IA 100% ativa! 🚀</li>
             </ol>
           </div>
         </div>

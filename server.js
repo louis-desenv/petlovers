@@ -15,22 +15,30 @@ function cleanApiVal(val) {
     .trim();
 }
 
-// Leitura direta do arquivo .env caso process.env ainda não tenha as chaves
+// Leitura direta de arquivos .env (.env, .env.local, .env.production) caso process.env ainda não tenha as chaves
 function getEnvFileVar(varName) {
   try {
-    const envPath = path.join(__dirname, ".env");
-    if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, "utf8");
-      const lines = content.split("\n");
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx !== -1) {
-          const key = trimmed.slice(0, eqIdx).trim();
-          if (key === varName) {
-            const val = trimmed.slice(eqIdx + 1);
-            return cleanApiVal(val);
+    const envFiles = [".env", ".env.local", ".env.production"];
+    const baseDirs = [__dirname, process.cwd()];
+    
+    for (const baseDir of baseDirs) {
+      for (const envFile of envFiles) {
+        const envPath = path.join(baseDir, envFile);
+        if (fs.existsSync(envPath)) {
+          const content = fs.readFileSync(envPath, "utf8");
+          const lines = content.split("\n");
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("#")) continue;
+            const eqIdx = trimmed.indexOf("=");
+            if (eqIdx !== -1) {
+              const key = trimmed.slice(0, eqIdx).trim();
+              if (key.toUpperCase() === varName.toUpperCase()) {
+                const val = trimmed.slice(eqIdx + 1);
+                const cleaned = cleanApiVal(val);
+                if (cleaned) return cleaned;
+              }
+            }
           }
         }
       }
@@ -155,32 +163,72 @@ async function downloadVideos() {
 // Inicia download de vídeos de suporte em background
 downloadVideos().catch(err => console.error("Erro no downloader de vídeos de background:", err));
 
-// Configuração do Google Gemini API com carregamento dinâmico via variável de ambiente
+// Configuração do Google Gemini API com carregamento dinâmico via variável de ambiente (Railway, Vercel, Docker, .env)
 function getCurrentKey() {
-  const envVal = 
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_KEY ||
-    process.env.GEMINI_APIKEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
-    process.env.API_KEY ||
-    "";
-  const cleaned = cleanApiVal(envVal);
-  if (cleaned) return cleaned;
+  // 1. Variáveis diretas prioritárias
+  const candidateKeys = [
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "GEMINI_KEY",
+    "GEMINI_APIKEY",
+    "GOOGLE_GEMINI_API_KEY",
+    "VITE_GEMINI_API_KEY",
+    "NEXT_PUBLIC_GEMINI_API_KEY",
+    "RAILWAY_GEMINI_API_KEY",
+    "API_KEY"
+  ];
+
+  for (const k of candidateKeys) {
+    if (process.env[k]) {
+      const cleaned = cleanApiVal(process.env[k]);
+      if (cleaned) return cleaned;
+    }
+  }
+
+  // 2. Busca dinâmica case-insensitive em todas as chaves do process.env (ótimo para Railway)
+  for (const [key, val] of Object.entries(process.env)) {
+    const lower = key.toLowerCase();
+    if (lower.includes("gemini") || (lower.includes("google") && lower.includes("key"))) {
+      const cleaned = cleanApiVal(val);
+      if (cleaned && cleaned.length > 5) return cleaned;
+    }
+  }
   
-  return getEnvFileVar("GEMINI_API_KEY") || getEnvFileVar("GOOGLE_API_KEY") || getEnvFileVar("API_KEY");
+  // 3. Busca em arquivos .env
+  for (const k of candidateKeys) {
+    const fileVal = getEnvFileVar(k);
+    if (fileVal) return fileVal;
+  }
+
+  return "";
 }
 
 function getMagicHourKey() {
+  const candidateKeys = [
+    "MAGIC_HOUR_API_KEY",
+    "MAGICHOUR_API_KEY",
+    "MAGIC_HOUR_KEY",
+    "MAGICHOUR_KEY"
+  ];
+
+  for (const k of candidateKeys) {
+    if (process.env[k]) {
+      const cleaned = cleanApiVal(process.env[k]);
+      if (cleaned && !cleaned.includes("sua_chave_aqui")) return cleaned;
+    }
+  }
+
   if (MAGIC_HOUR_API_KEY && !MAGIC_HOUR_API_KEY.includes("sua_chave_aqui")) {
     return cleanApiVal(MAGIC_HOUR_API_KEY);
   }
-  const envVal = process.env.MAGIC_HOUR_API_KEY || "";
-  const cleaned = cleanApiVal(envVal);
-  if (cleaned) return cleaned;
-  return getEnvFileVar("MAGIC_HOUR_API_KEY") || "";
+
+  for (const k of candidateKeys) {
+    const fileVal = getEnvFileVar(k);
+    if (fileVal && !fileVal.includes("sua_chave_aqui")) return fileVal;
+  }
+
+  return "";
 }
 
 // Função de diagnóstico de status das APIs
@@ -208,46 +256,57 @@ async function checkApiStatuses() {
 
   if (!geminiKey) {
     status.gemini.error = "GEMINI_API_KEY_MISSING";
-    status.gemini.message = "A variável GEMINI_API_KEY não está configurada no Vercel. Adicione GEMINI_API_KEY em Settings > Environment Variables no Vercel e faça Redeploy!";
+    status.gemini.message = "A variável GEMINI_API_KEY não foi encontrada. No Railway: acesse seu serviço > aba Variables > adicione GEMINI_API_KEY com sua chave do Google AI Studio.";
   } else {
-    try {
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      const testRes = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: "ping"
-      });
-      if (testRes && testRes.text) {
-        status.gemini.connected = true;
-        status.gemini.message = "Conexão com a API do Gemini estabelecida e respondendo normalmente! ✨";
-      }
-    } catch (err) {
+    const testModels = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.8-flash"];
+    let pingSuccess = false;
+    let lastErrMessage = "";
+
+    for (const testModel of testModels) {
+      if (pingSuccess) break;
       try {
-        const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
-        const restRes = await fetch(restUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: [{ text: "ping" }] }] })
+        const ai = new GoogleGenAI({ apiKey: geminiKey });
+        const testRes = await ai.models.generateContent({
+          model: testModel,
+          contents: "ping"
         });
-        if (restRes.ok) {
+        if (testRes && testRes.text) {
           status.gemini.connected = true;
-          status.gemini.message = "Conexão com a API do Gemini estabelecida via REST! ✨";
-        } else {
-          const errText = await restRes.text();
-          status.gemini.connected = false;
-          status.gemini.error = `GEMINI_HTTP_${restRes.status}`;
-          status.gemini.message = `Chave GEMINI_API_KEY presente, mas retornou erro HTTP ${restRes.status}: ${errText}`;
+          status.gemini.message = `Conexão com a API do Gemini estabelecida e respondendo normalmente (${testModel})! ✨`;
+          pingSuccess = true;
+          break;
         }
-      } catch (restErr) {
-        status.gemini.connected = false;
-        status.gemini.error = "GEMINI_TEST_FAILED";
-        status.gemini.message = `Erro ao conectar com a API do Gemini: ${err.message}`;
+      } catch (err) {
+        lastErrMessage = err.message || String(err);
+        try {
+          const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent?key=${geminiKey}`;
+          const restRes = await fetch(restUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: [{ parts: [{ text: "ping" }] }] })
+          });
+          if (restRes.ok) {
+            status.gemini.connected = true;
+            status.gemini.message = `Conexão com a API do Gemini estabelecida via REST (${testModel})! ✨`;
+            pingSuccess = true;
+            break;
+          }
+        } catch (restErr) {
+          lastErrMessage = restErr.message || String(restErr);
+        }
       }
+    }
+
+    if (!pingSuccess) {
+      status.gemini.connected = false;
+      status.gemini.error = "GEMINI_PING_FAILED";
+      status.gemini.message = `Chave detectada, mas os modelos não responderam: ${lastErrMessage.slice(0, 180)}`;
     }
   }
 
   if (!magicHourKey || magicHourKey.includes("sua_chave_aqui")) {
     status.magicHour.error = "MAGIC_HOUR_KEY_MISSING";
-    status.magicHour.message = "A variável MAGIC_HOUR_API_KEY não foi configurada. Adicione MAGIC_HOUR_API_KEY para permitir geração de vídeos 3D.";
+    status.magicHour.message = "A variável MAGIC_HOUR_API_KEY não foi configurada. Adicione MAGIC_HOUR_API_KEY nas variáveis do Railway para permitir geração de vídeos 3D.";
   } else {
     try {
       const mhRes = await fetch("https://api.magichour.ai/v1/account", {
@@ -345,7 +404,7 @@ async function callGemini(contents, systemInstruction, history = []) {
 
   const currentKey = getCurrentKey();
   if (!currentKey) {
-    const errorDetails = "GEMINI_API_KEY_MISSING: A variável de ambiente GEMINI_API_KEY não foi encontrada no servidor (ex: Vercel). O aplicativo está usando contingência local.";
+    const errorDetails = "GEMINI_API_KEY_MISSING: A variável GEMINI_API_KEY não foi encontrada nas variáveis de ambiente do Railway. Adicione GEMINI_API_KEY no painel da Railway em Variables.";
     console.warn("⚠️ [Gemini Client] " + errorDetails);
     return generateSmartFallback(lastUserText, history, errorDetails);
   }
@@ -1124,10 +1183,6 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
     video_prompt = `An adorable 3D Pixar-style animated scene of a cute ${pet.petType || "pet"} named ${pet.petName || "hero"}, a lovely ${pet.petBreed || pet.petType || "pet"} with ${pet.coatColor || "beautiful coat"}, doing ${actionDesc} in an enchanting cinematic scene. Vibrant lighting, joyful atmosphere, ultra detailed 8k.`;
   }
 
-  if (apiErrorMsg) {
-    response += `\n\n⚠️ (Aviso do Dr. Miau: Não foi possível se conectar com a API do Gemini no momento. Motivo: ${apiErrorMsg})`;
-  }
-
   return {
     response,
     sentiment,
@@ -1849,7 +1904,7 @@ Responda EXCLUSIVAMENTE em JSON com as chaves:
 
     const apiStatus = {
       gemini_connected: !parsed.api_fallback_used && !!geminiKey,
-      gemini_error: parsed.api_error_detail || (!geminiKey ? "GEMINI_API_KEY_MISSING: Chave não encontrada nas variáveis de ambiente do Vercel." : null),
+      gemini_error: parsed.api_error_detail || (!geminiKey ? "GEMINI_API_KEY_MISSING: Chave GEMINI_API_KEY não configurada no servidor (adicione em Railway > Variables)." : null),
       magic_hour_configured: !!magicHourKey && !magicHourKey.includes("sua_chave_aqui"),
       magic_hour_error: mhError
     };

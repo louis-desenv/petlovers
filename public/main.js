@@ -1762,8 +1762,8 @@ async function fetchApiStatus() {
   } catch (err) {
     console.warn("⚠️ Não foi possível verificar o status das APIs:", err);
     updateApiStatusUI({
-      gemini: { connected: false, message: "Servidor Vercel não respondeu ao teste de status das APIs." },
-      magicHour: { connected: false, message: "Servidor Vercel não respondeu ao teste de status das APIs." }
+      gemini: { connected: false, message: "O servidor não respondeu ao teste de status das APIs (verifique logs ou variáveis)." },
+      magicHour: { connected: false, message: "O servidor não respondeu ao teste de status das APIs (verifique logs ou variáveis)." }
     });
   }
 }
