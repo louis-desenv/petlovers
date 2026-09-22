@@ -13,7 +13,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 // ─── Mensagem inicial ─────────────────────────────────────────────────────────
 const INITIAL_MESSAGE =
-  "Olá! Sou o Dr. Miau! 🐾 É um prazer imenso estar aqui com você! Fique à vontade para bater um papo, contar como foi seu dia ou me fazer qualquer pergunta!";
+  "Olá, eu sou o Dr. Miau, veterinário e apaixonado por todas as espécies do reino animal! 🐾🎬 Tenho uma surpresa especial preparada para o seu pet no final da nossa conversa. Para isso ficar incrível, me conta: qual é o nome dele e que espécie de animalzinho é?";
 
 // ─── Pool de Animações com Chance (%) ─────────────────────────────────────────
 const ANIMATION_POOL = {
