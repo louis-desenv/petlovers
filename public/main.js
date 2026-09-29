@@ -473,6 +473,21 @@ function showSpeaking(show) {
 // ════════════════════════════════════════════════════════════════════════════
 //  Histórico de mensagens
 // ════════════════════════════════════════════════════════════════════════════
+// Helper de rolagem suave (smooth scroll) para o chat e histórico
+function scrollToBottom(container, smooth = true) {
+  if (!container) return;
+  requestAnimationFrame(() => {
+    try {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: smooth ? "smooth" : "auto"
+      });
+    } catch (err) {
+      container.scrollTop = container.scrollHeight;
+    }
+  });
+}
+
 function pushMessage(role, text, extra = {}) {
   const cleanText = cleanPortugueseText(text);
   const msg = { id: uid(), role, text: cleanText, ts: Date.now(), ...extra };
@@ -484,6 +499,10 @@ function pushMessage(role, text, extra = {}) {
   saveStateToCache();
   renderHistory();
   renderMiniHistory();
+  
+  // Rolagem suave instantânea quando a nova mensagem é adicionada pelo Dr. Miau ou tutor
+  scrollToBottom(ui.miniHistory, true);
+  scrollToBottom(ui.historyList, true);
   return msg;
 }
 
@@ -603,6 +622,11 @@ function renderHistory() {
     }
     ui.historyList.append(grid);
   }
+
+  scrollToBottom(ui.historyList, true);
+  setTimeout(() => {
+    scrollToBottom(ui.historyList, true);
+  }, 40);
 }
 
 function renderMiniHistory() {
@@ -720,10 +744,11 @@ function renderMiniHistory() {
     ui.miniHistory.append(item);
   }
 
-  // Auto-scroll suave para manter as últimas interações à vista
+  // Auto-scroll suave garantido para acompanhar a parte final da conversa
+  scrollToBottom(ui.miniHistory, true);
   setTimeout(() => {
-    ui.miniHistory.scrollTop = ui.miniHistory.scrollHeight;
-  }, 50);
+    scrollToBottom(ui.miniHistory, true);
+  }, 40);
 }
 
 function toggleMiniHistory() {
@@ -948,7 +973,145 @@ function toggleListening() {
 // ════════════════════════════════════════════════════════════════════════════
 //  Resposta do agente (via API do Gemini integrada)
 // ════════════════════════════════════════════════════════════════════════════
-async function pollVideoStatus(jobId, messageId) {
+//  Status e Polling do Vídeo (ElevenLabs Seedance 2.5 / Fallback)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Helper UI para atualização do Banner de Progresso de Vídeo (Atlas Cloud Seedance 2.0 Mini)
+function updateVideoProgressUI(percent, desc, showBanner = true, elapsedSec = null, details = null) {
+  const banner = document.getElementById("videoProgressBanner");
+  const percentEl = document.getElementById("videoProgressPercent");
+  const descEl = document.getElementById("videoProgressDesc");
+  const fillEl = document.getElementById("videoProgressBarFill");
+  const timeEl = document.getElementById("videoProgressTime");
+
+  if (!banner) return;
+
+  if (showBanner) {
+    banner.classList.remove("hidden");
+    const p = Math.min(100, Math.max(0, Math.round(percent)));
+    if (percentEl) {
+      percentEl.textContent = `${p}%`;
+    }
+    if (descEl) {
+      descEl.textContent = desc || "Sintetizando animação 3D na Atlas Cloud...";
+    }
+    if (fillEl) {
+      fillEl.style.width = `${p}%`;
+    }
+    if (timeEl && elapsedSec !== null) {
+      const extraInfo = details?.workerStage ? ` • ${details.workerStage}` : "";
+      timeEl.textContent = `⏱️ ${elapsedSec}s${extraInfo}`;
+      timeEl.title = details?.jobId ? `Job ID: ${details.jobId} | Status: ${details.status}` : "";
+    }
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+/**
+ * Calcula o progresso real e dinâmico de 0% a 100% a partir da resposta da API Atlas Cloud,
+ * garantindo que a barra de progresso e o indicador percentual avancem suavemente sem congelar em 95-98%.
+ */
+function calculateRealTimeVideoProgress(statusData, elapsedSec, pollTicks) {
+  const status = (statusData?.status || "").toLowerCase();
+  const outputs = Array.isArray(statusData?.outputs) ? statusData.outputs : [];
+  const rawVideoUrl = statusData?.download_url || statusData?.video_url || (outputs.length > 0 ? outputs[0] : null);
+  const metrics = statusData?.metrics || {};
+
+  // Validação estrita do URL do vídeo retornado
+  const isValidVideoUrl = Boolean(
+    rawVideoUrl &&
+    typeof rawVideoUrl === "string" &&
+    rawVideoUrl.trim().length > 10 &&
+    (rawVideoUrl.startsWith("http://") || rawVideoUrl.startsWith("https://") || rawVideoUrl.startsWith("/api/proxy-video"))
+  );
+
+  const videoUrl = isValidVideoUrl ? rawVideoUrl.trim() : null;
+
+  const isCompleted = (status === "completed" || status === "succeeded" || status === "complete") && Boolean(videoUrl);
+  const isFailed = status === "failed" || status === "error" || status === "canceled" || status === "timeout";
+
+  if (isCompleted && videoUrl) {
+    return {
+      percent: 100,
+      desc: "✔ Animação 3D concluída com sucesso! Abrindo reprodutor...",
+      isCompleted: true,
+      isFailed: false,
+      workerStage: "Concluído",
+      videoUrl,
+      error: null
+    };
+  }
+
+  if (isFailed) {
+    const errorMsg = statusData?.error || (status === "timeout" ? "Tempo limite de resposta na Atlas Cloud" : "Falha na renderização de vídeo");
+    return {
+      percent: 0,
+      desc: `❌ Falha: ${errorMsg}`,
+      isCompleted: false,
+      isFailed: true,
+      workerStage: "Falha",
+      videoUrl: null,
+      error: errorMsg
+    };
+  }
+
+  // Estado ativo de renderização / fila da GPU na Atlas Cloud
+  const executionTime = metrics.executionTime || 0;
+  const inferenceTime = metrics.inferenceTime || 0;
+  let workerStage = metrics.workerStage || "Processando";
+  let percent = 10;
+  let desc = "Sintetizando animação 3D na Atlas Cloud...";
+
+  if (executionTime > 0 || inferenceTime > 0) {
+    // Inferência GPU ativa no cluster
+    workerStage = "Inferência GPU Ativa";
+    const execSec = Math.max(1, Math.round(executionTime / 1000));
+    percent = Math.min(98, Math.round(55 + (execSec / 45) * 40));
+    desc = `🔥 Inferência GPU em andamento (${execSec}s de processamento no cluster)...`;
+  } else {
+    // Estágios da pipeline Atlas Cloud (Seedance 2.0 Mini 720p 15s)
+    if (elapsedSec <= 6) {
+      percent = Math.round(10 + (elapsedSec / 6) * 15); // 10% -> 25%
+      desc = "Alocando container GPU na Atlas Cloud...";
+      workerStage = "Inicialização";
+    } else if (elapsedSec <= 22) {
+      percent = Math.round(25 + ((elapsedSec - 6) / 16) * 25); // 25% -> 50%
+      desc = "Condicionando imagem e modelo Seedance 2.0 Mini...";
+      workerStage = "Carregando Modelo";
+    } else if (elapsedSec <= 60) {
+      percent = Math.round(50 + ((elapsedSec - 22) / 38) * 25); // 50% -> 75%
+      desc = `Renderizando 15s em 720p na GPU Atlas Cloud (${elapsedSec}s)...`;
+      workerStage = "Renderizando 720p";
+    } else if (elapsedSec <= 120) {
+      percent = Math.round(75 + ((elapsedSec - 60) / 60) * 15); // 75% -> 90%
+      desc = `Pós-processamento e áudio sincronizado (${elapsedSec}s)...`;
+      workerStage = "Pós-produção";
+    } else {
+      // Progressão assintótica contínua: avança suavemente a cada segundo (ex: 91% -> 92% -> 93% ... 98% -> 99%)
+      // sem nunca travar estática em um número fixo
+      const dynamicDelta = elapsedSec - 120;
+      const continuousProgress = 90 + 9 * (1 - Math.exp(-dynamicDelta / 160));
+      percent = Math.min(99, Math.max(90, Math.round(continuousProgress)));
+      desc = `⏳ Renderização 720p na Atlas Cloud (${elapsedSec}s) • Quase pronto...`;
+      workerStage = "Finalizando";
+    }
+  }
+
+  return {
+    percent,
+    desc,
+    isCompleted: false,
+    isFailed: false,
+    workerStage,
+    videoUrl: null,
+    error: null
+  };
+}
+
+async function pollVideoStatus(jobId, messageId, videoPrompt = "") {
+  console.info(`%c[Atlas Cloud Polling Start] Iniciando monitoramento da tarefa ID: ${jobId}`, "color: #06b6d4; font-weight: bold;");
+  
   // Inicializa o status pendente no objeto da mensagem
   const msgIndex = state.messages.findIndex(m => m.id === messageId);
   if (msgIndex !== -1) {
@@ -956,77 +1119,122 @@ async function pollVideoStatus(jobId, messageId) {
     renderMiniHistory();
   }
 
+  const pollStartTime = Date.now();
+  // Exibe o banner de progresso flutuante imediatamente com tema escuro e esmeralda
+  updateVideoProgressUI(10, "Conectando ao estúdio Atlas Cloud (Seedance 2.0 Mini)...", true, 0, {
+    jobId,
+    status: "iniciando",
+    workerStage: "Iniciando"
+  });
+
   let errorCount = 0;
+  let pollTicks = 0;
 
   const pollInterval = setInterval(async () => {
+    pollTicks++;
+
     try {
       const res = await fetch(`/api/video-status/${jobId}`);
-      if (!res.ok) throw new Error(`Falha HTTP ${res.status} ao consultar status do vídeo.`);
+      if (!res.ok) {
+        throw new Error(`Falha HTTP ${res.status} (${res.statusText}) ao consultar status do vídeo na rota /api/video-status/${jobId}`);
+      }
       
       const data = await res.json();
-      console.log(`[Magic Hour Poll] Job ${jobId} Status: ${data.status}`);
+      const metrics = data.metrics || {};
+      const elapsedSec = metrics.elapsedSeconds !== undefined ? metrics.elapsedSeconds : Math.round((Date.now() - pollStartTime) / 1000);
+
+      // Calcula o progresso real-time a partir da resposta da Atlas Cloud
+      const progress = calculateRealTimeVideoProgress(data, elapsedSec, pollTicks);
+
+      console.groupCollapsed(`%c[Atlas Cloud Poll #${pollTicks}] Job: ${jobId} | Status: ${data.status} | Progresso: ${progress.percent}% | ⏱️ ${elapsedSec}s`, "color: #2dd4bf;");
+      console.log("📦 Dados brutos da API:", data);
+      console.log("⚙️ Métricas computadas:", metrics);
+      console.log("🎥 URL do Vídeo Resolvida:", progress.videoUrl || "(ainda não finalizado)");
+      console.log("🏷️ Estágio:", progress.workerStage);
+      console.groupEnd();
 
       const idx = state.messages.findIndex(m => m.id === messageId);
       if (idx === -1) {
+        console.warn(`[Atlas Cloud Poll] Mensagem ${messageId} não mais presente no estado. Encerrando polling.`);
         clearInterval(pollInterval);
+        updateVideoProgressUI(0, "", false);
         return;
       }
 
       // Reset error count on successful status check
       errorCount = 0;
 
-      const isCompleted = data.status === "completed" || data.status === "complete" || data.status === "success";
-      const isFailed = data.status === "failed" || data.status === "error" || data.status === "canceled";
+      if (progress.isCompleted && progress.videoUrl) {
+        clearInterval(pollInterval);
+        console.info(`%c🎉 [Atlas Cloud Sucesso] Vídeo finalizado e validado com sucesso!\nURL: ${progress.videoUrl}`, "color: #10b981; font-size: 13px; font-weight: bold;");
 
-      if (isCompleted && data.download_url) {
-        clearInterval(pollInterval);
+        updateVideoProgressUI(100, progress.desc, true, elapsedSec, {
+          jobId,
+          status: "completed",
+          workerStage: "Concluído"
+        });
+
         state.messages[idx].videoStatus = "completed";
-        state.messages[idx].videoUrl = data.download_url;
-        state.messages[idx].text = "✨ Miau! Seu vídeo cinematográfico foi gerado com absoluto sucesso pelo meu estúdio! Ficou fantástico! Assista agora aqui no player de vídeo: 🎬👇";
+        state.messages[idx].videoUrl = progress.videoUrl;
+        state.messages[idx].text = "✨ Miau! Sua animação 3D de 15 segundos (720p 16:9) foi gerada com sucesso pela Atlas Cloud! Assista abaixo ou veja na Galeria: 🎬👇";
         renderMiniHistory();
         
-        // Mantém o Dr. Miau como ele mesmo e exibe a animação feliz dele ao terminar o vídeo
+        // Mantém o Dr. Miau alegre
         playEmotionalVideo(getRandomVideoForEmotion("feliz"));
-        setBubble("✨ Miau! Seu vídeo cinematográfico do pet está pronto! Assista na tela abaixo!");
+        setBubble("✨ Miau! Sua animação 3D da Atlas Cloud (720p 15s) está pronta! Assista na tela ou acesse a Galeria!");
         
-        // Abre a modal de apresentação do vídeo pronto
-        openVideoModal(data.download_url);
-      } else if (isFailed) {
-        clearInterval(pollInterval);
-        state.messages[idx].videoStatus = "completed";
-        state.messages[idx].videoUrl = "/videos/magichour_fallback.mp4";
-        state.messages[idx].text = "✨ Miau! Como houve uma instabilidade momentânea no Magic Hour, carreguei o vídeo cinematográfico de demonstração do seu pet para você assistir! Ficou incrível! 🎬👇";
-        renderMiniHistory();
-        playEmotionalVideo(getRandomVideoForEmotion("feliz"));
-        setBubble("✨ Miau! Carreguei o vídeo cinematográfico do pet para você! Assista na tela abaixo!");
-        openVideoModal("/videos/magichour_fallback.mp4");
-      } else {
-        // Atualiza o progresso do status ("queued" | "processing" | "rendering")
-        let currentStatus = "queued";
-        if (data.status === "processing" || data.status === "rendering" || data.status === "running") {
-          currentStatus = "processing";
+        // Salva na galeria (EXCLUSIVAMENTE vídeos gerados pela Atlas Cloud ao final da conversa)
+        if (window.GalleryManager && typeof window.GalleryManager.save === "function") {
+          window.GalleryManager.save(
+            progress.videoUrl,
+            videoPrompt || state.lastGeneratedPrompt?.prompt || "Animação 3D 720p gerada pela Atlas Cloud",
+            state.petProfile?.name || "Pet Especial"
+          );
         }
-        state.messages[idx].videoStatus = currentStatus;
+
+        openVideoModal(progress.videoUrl);
+
+        setTimeout(() => {
+          updateVideoProgressUI(0, "", false);
+        }, 2500);
+
+      } else if (progress.isFailed) {
+        clearInterval(pollInterval);
+        console.error(`%c❌ [Atlas Cloud Erro] Falha na renderização do vídeo!\nDetalhe: ${progress.error}`, "color: #ef4444; font-size: 13px; font-weight: bold;");
+        updateVideoProgressUI(0, "", false);
+
+        state.messages[idx].videoStatus = "failed";
+        state.messages[idx].text = `❌ Miau! Ocorreu uma falha no estúdio de vídeo da Atlas Cloud: ${progress.error}.`;
         renderMiniHistory();
+        setBubble(`❌ Falha na Atlas Cloud: ${progress.error}`);
+
+      } else {
+        state.messages[idx].videoStatus = "processing";
+        renderMiniHistory();
+        updateVideoProgressUI(progress.percent, progress.desc, true, elapsedSec, {
+          jobId,
+          status: data.status,
+          workerStage: progress.workerStage,
+          elapsedSec
+        });
       }
     } catch (err) {
       errorCount++;
-      console.warn(`[Poll Video Warning] Tentativa ${errorCount}/6 falhou para o job ${jobId}:`, err.message);
-      if (errorCount >= 6) {
+      console.warn(`[Atlas Cloud Poll Warning] Tentativa com erro ${errorCount}/600 para o job ${jobId}:`, err.message);
+      if (errorCount >= 600) {
         clearInterval(pollInterval);
+        console.error(`[Atlas Cloud Poll Timeout] Limite de tentativas excedido para o job ${jobId}.`);
+        updateVideoProgressUI(0, "", false);
         const idx = state.messages.findIndex(m => m.id === messageId);
         if (idx !== -1) {
-          state.messages[idx].videoStatus = "completed";
-          state.messages[idx].videoUrl = "/videos/magichour_fallback.mp4";
-          state.messages[idx].text = "✨ Miau! O serviço online demorou a responder, então disponibilizei a prévia do seu vídeo cinematográfico aqui! 🎬👇";
+          state.messages[idx].videoStatus = "failed";
+          state.messages[idx].text = "❌ Miau! O tempo limite para receber a animação do estúdio Atlas Cloud expirou.";
           renderMiniHistory();
-          playEmotionalVideo(getRandomVideoForEmotion("feliz"));
-          setBubble("✨ Miau! Carreguei a prévia do seu vídeo cinematográfico! Assista na tela abaixo!");
-          openVideoModal("/videos/magichour_fallback.mp4");
+          setBubble("❌ O tempo de resposta do servidor da Atlas Cloud expirou.");
         }
       }
     }
-  }, 4000);
+  }, 2000);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1094,19 +1302,25 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
       .filter(m => m.text !== INITIAL_MESSAGE)
       .map(m => ({
         role: m.role === "Voce" ? "user" : "model",
-        text: m.text
+        text: m.text,
+        image: m.imageUrl || null
       }));
 
     let data = null;
     let streamedText = "";
     let firstChunkReceived = false;
 
+    const sessionState = {
+      currentPhase: state.currentPhase || 1,
+      progress: state.progress || 0
+    };
+
     // Tenta primeiro via SSE Streaming em tempo real para latência quase zero
     try {
       const streamRes = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: fullMessageToAgent, history })
+        body: JSON.stringify({ message: fullMessageToAgent, history, sessionState })
       });
 
       if (streamRes.ok && streamRes.body) {
@@ -1141,6 +1355,7 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
                   }
                   streamedText += parsedSSE.chunk;
                   setBubble(streamedText);
+                  scrollToBottom(ui.miniHistory, true);
                 } else if (parsedSSE.type === "done" && parsedSSE.data) {
                   data = parsedSSE.data;
                 }
@@ -1162,7 +1377,7 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ message: fullMessageToAgent, history })
+        body: JSON.stringify({ message: fullMessageToAgent, history, sessionState })
       });
 
       if (!res.ok) {
@@ -1223,7 +1438,7 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
     setBubble(data.response);
     setDockTitle("Pronto para conversar");
 
-    // Se a resposta contiver um video_prompt gerado para o Magic Hour, guarda para consulta/testes
+    // Se a resposta contiver um video_prompt gerado para o estúdio de vídeo, guarda para consulta/testes
     if (data.video_prompt && typeof data.video_prompt === "string" && data.video_prompt.trim()) {
       state.lastGeneratedPrompt = {
         prompt: data.video_prompt.trim(),
@@ -1252,29 +1467,20 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
     // Termina a animação de fala após algum tempo
     setTimeout(() => showSpeaking(false), 4500);
 
-    // Se a geração foi disparada, monitora o jobId ou aciona o fallback se o Magic Hour não pôde ser iniciado
+    // Se a geração foi disparada ao final da conversa, monitora o jobId da Atlas Cloud
     if (data.jobId) {
-      console.log(`[Magic Hour Triggered] Começando a escutar o jobId: ${data.jobId}`);
-      pollVideoStatus(data.jobId, addedMsg.id);
-    } else if (data.trigger_video_generation || (data.video_prompt && !data.jobId)) {
-      console.log("[Magic Hour Fallback] Magic Hour indisponível para renderização online. Ativando fallback.");
+      console.log(`[Atlas Cloud Video Triggered] Final de conversa alcançado! Monitorando jobId: ${data.jobId}`);
+      pollVideoStatus(data.jobId, addedMsg.id, data.video_prompt || "");
+    } else if (data.trigger_video_generation && !data.jobId) {
+      const errDetail = data.api_status?.atlascloud_error || "Servidor não retornou taskId de geração de vídeo da Atlas Cloud.";
+      console.warn("❌ [Atlas Cloud Video Trigger Error]:", errDetail);
       const fallbackMsgIndex = state.messages.findIndex(m => m.id === addedMsg.id);
       if (fallbackMsgIndex !== -1) {
-        state.messages[fallbackMsgIndex].videoStatus = "processing";
+        state.messages[fallbackMsgIndex].videoStatus = "failed";
+        state.messages[fallbackMsgIndex].text += `\n\n⚠️ (Estúdio Atlas Cloud: ${errDetail})`;
         renderMiniHistory();
       }
-      setTimeout(() => {
-        const currentIdx = state.messages.findIndex(m => m.id === addedMsg.id);
-        if (currentIdx !== -1) {
-          state.messages[currentIdx].videoStatus = "completed";
-          state.messages[currentIdx].videoUrl = "/videos/magichour_fallback.mp4";
-          state.messages[currentIdx].text = "✨ Miau! O roteiro cinematográfico do seu pet foi concluído! Como o estúdio Magic Hour não pôde renderizar online agora, preparei este vídeo alternativo para você assistir! 🎬👇";
-          renderMiniHistory();
-        }
-        playEmotionalVideo(getRandomVideoForEmotion("feliz"));
-        setBubble("✨ Miau! Seu vídeo cinematográfico está pronto! Assista na tela abaixo!");
-        openVideoModal("/videos/magichour_fallback.mp4");
-      }, 3500);
+      setBubble(`❌ Ocorreu um erro no estúdio Atlas Cloud: ${errDetail}`);
     }
 
   } catch (err) {
@@ -1503,15 +1709,23 @@ function openVideoModal(videoUrl) {
   
   if (!modal || !videoPlayer || !downloadBtn) return;
   
-  videoPlayer.onerror = () => {
-    console.warn("[Video Modal] Erro ao carregar o vídeo da URL fornecida. Alternando para o vídeo de fallback do Magic Hour.");
-    if (videoPlayer.src && !videoPlayer.src.includes("magichour_fallback.mp4")) {
-      videoPlayer.src = "/videos/magichour_fallback.mp4";
-      downloadBtn.href = "/videos/magichour_fallback.mp4";
+  // Salva automaticamente o vídeo gerado na Galeria
+  saveGalleryVideo(videoUrl, state.lastGeneratedPrompt?.prompt || "Animação 3D 720p gerada pela Atlas Cloud", state.petProfile?.name || "Pet Especial");
+
+  let triedProxy = false;
+  videoPlayer.onerror = (e) => {
+    console.warn("[Video Modal] Erro ao reproduzir o vídeo gerado da URL:", videoUrl, e);
+    // Tenta carregar via proxy caso o navegador/iframe bloqueie CORS direto do CDN da Atlas Cloud
+    if (!triedProxy && videoUrl && videoUrl.startsWith("http") && !videoUrl.includes("/api/proxy-video")) {
+      triedProxy = true;
+      const proxiedUrl = `/api/proxy-video?url=${encodeURIComponent(videoUrl)}`;
+      console.log("[Video Modal] Alternando para streaming seguro via proxy do servidor:", proxiedUrl);
+      videoPlayer.src = proxiedUrl;
+      downloadBtn.href = proxiedUrl;
       try {
         videoPlayer.load();
         videoPlayer.play().catch(() => {});
-      } catch (e) {}
+      } catch (err) {}
     }
   };
 
@@ -1523,7 +1737,7 @@ function openVideoModal(videoUrl) {
   try {
     videoPlayer.load();
     videoPlayer.play().catch(err => {
-      console.warn("Autoplay do modal bloqueado:", err);
+      console.warn("Autoplay do modal bloqueado pelo navegador:", err);
     });
   } catch (err) {
     console.error("Erro ao rodar vídeo no modal:", err);
@@ -1553,6 +1767,179 @@ function closeVideoModal() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+//  GALERIA DE VÍDEOS 3D DO DR. MIAU (EXCLUSIVA PARA VÍDEOS DA ATLAS CLOUD)
+// ════════════════════════════════════════════════════════════════════════════
+const GalleryManager = {
+  // Chave de armazenamento exclusiva para vídeos gerados ao final de conversa
+  STORAGE_KEY: "drMiau_atlas_gallery_v3",
+
+  getAll() {
+    try {
+      const stored = localStorage.getItem(this.STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          // Filtra estritamente apenas vídeos reais gerados ao final da conversa
+          return parsed.filter(v => v && v.videoUrl && !v.id?.startsWith("demo_") && !v.videoUrl.includes("demo"));
+        }
+      }
+    } catch (e) {
+      console.warn("[Gallery] Falha ao ler localStorage da galeria:", e);
+    }
+    // A galeria deve iniciar vazia; apenas vídeos criados no final da conversa aparecem
+    return [];
+  },
+
+  save(videoUrl, prompt = "", petName = "Seu Pet") {
+    if (!videoUrl) return;
+    // Não salva vídeos do sistema de reações locais
+    if (videoUrl.includes("esperandoresposta.mp4") || videoUrl.includes("normal.mp4")) {
+      return;
+    }
+    try {
+      let list = this.getAll();
+      if (list.some(v => v.videoUrl === videoUrl)) return;
+      const newItem = {
+        id: "atlas_" + Date.now(),
+        videoUrl: videoUrl,
+        prompt: prompt || "Animação 3D cinematográfica gerada pela Atlas Cloud",
+        petName: petName || "Pet Especial",
+        createdAt: new Date().toISOString(),
+        resolution: "720p",
+        duration: 15,
+        source: "Atlas Cloud"
+      };
+      list.unshift(newItem);
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(list));
+      this.render();
+      console.log(`[Gallery] Novo vídeo gerado pela Atlas Cloud salvo com sucesso:`, newItem);
+    } catch (e) {
+      console.warn("[Gallery] Erro ao salvar vídeo na galeria:", e);
+    }
+  },
+
+  delete(id) {
+    try {
+      let list = this.getAll().filter(v => v.id !== id);
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(list));
+      this.render();
+    } catch (e) {
+      console.warn("[Gallery] Erro ao excluir vídeo da galeria:", e);
+    }
+  },
+
+  isOpen() {
+    const backdrop = document.getElementById("galleryModalBackdrop");
+    if (!backdrop) return false;
+    return !backdrop.classList.contains("hidden") && backdrop.style.display === "flex";
+  },
+
+  open() {
+    const backdrop = document.getElementById("galleryModalBackdrop");
+    const btn = document.getElementById("chatGalleryBtn");
+    if (!backdrop) {
+      console.error("[Gallery] Elemento #galleryModalBackdrop não encontrado!");
+      return;
+    }
+    this.render();
+    backdrop.classList.remove("hidden");
+    backdrop.style.display = "flex";
+    backdrop.setAttribute("aria-hidden", "false");
+    if (btn) {
+      btn.classList.add("is-active");
+      btn.setAttribute("aria-expanded", "true");
+    }
+  },
+
+  close() {
+    const backdrop = document.getElementById("galleryModalBackdrop");
+    const btn = document.getElementById("chatGalleryBtn");
+    if (!backdrop) return;
+    backdrop.classList.add("hidden");
+    backdrop.style.display = "none";
+    backdrop.setAttribute("aria-hidden", "true");
+    if (btn) {
+      btn.classList.remove("is-active");
+      btn.setAttribute("aria-expanded", "false");
+    }
+    const videos = backdrop.querySelectorAll("video");
+    videos.forEach(v => {
+      try { v.pause(); } catch (_) {}
+    });
+  },
+
+  toggle() {
+    if (this.isOpen()) {
+      this.close();
+    } else {
+      this.open();
+    }
+  },
+
+  render() {
+    const grid = document.getElementById("galleryModalGrid");
+    if (!grid) return;
+    const videos = this.getAll();
+
+    if (videos.length === 0) {
+      grid.innerHTML = `
+        <div class="gallery-empty">
+          <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+            <line x1="7" y1="2" x2="7" y2="22"></line>
+            <line x1="17" y1="2" x2="17" y2="22"></line>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+          </svg>
+          <h3>Nenhuma animação gerada ainda</h3>
+          <p>Esta galeria exibirá <strong>exclusivamente</strong> os vídeos 3D gerados pela <strong>Atlas Cloud</strong> ao final de uma conversa concluída com o Dr. Miau.</p>
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = videos.map(item => `
+      <div class="gallery-card">
+        <div class="gallery-card__video-wrap">
+          <video src="${item.videoUrl}" controls playsinline preload="metadata" class="gallery-card__video"></video>
+          <span class="gallery-card__badge">${item.resolution || "720p"} • ${item.duration || 15}s • Atlas Cloud</span>
+        </div>
+        <div class="gallery-card__info">
+          <div class="gallery-card__title">
+            <span>🎬 ${item.petName || "Pet Especial"}</span>
+            <span class="gallery-card__time">${new Date(item.createdAt).toLocaleDateString("pt-BR")}</span>
+          </div>
+          <p class="gallery-card__prompt">"${item.prompt || "Animação 3D cinematográfica do pet gerada pela Atlas Cloud"}"</p>
+          <div class="gallery-card__actions">
+            <button class="gallery-card__btn gallery-card__btn--delete" onclick="window.GalleryManager.delete('${item.id}')">
+              Excluir
+            </button>
+            <a href="${item.videoUrl}" download="dr-miau-atlas-${(item.petName || "pet").toLowerCase().replace(/\\s+/g, '-')}.mp4" target="_blank" rel="noreferrer" class="gallery-card__btn gallery-card__btn--download">
+              Baixar MP4
+            </a>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+};
+
+// Exporta globalmente para compatibilidade universal
+window.GalleryManager = GalleryManager;
+window.openGalleryModal = (open = null) => {
+  if (open === true) GalleryManager.open();
+  else if (open === false) GalleryManager.close();
+  else GalleryManager.toggle();
+};
+window.toggleGalleryModal = () => GalleryManager.toggle();
+window.closeGalleryModal = () => GalleryManager.close();
+window.deleteGalleryVideo = (id) => GalleryManager.delete(id);
+window.saveGalleryVideo = (url, prompt, name) => GalleryManager.save(url, prompt, name);
+function getSavedGalleryVideos() { return GalleryManager.getAll(); }
+function saveGalleryVideo(url, prompt, name) { GalleryManager.save(url, prompt, name); }
+function deleteGalleryVideo(id) { GalleryManager.delete(id); }
+function renderGalleryGrid() { GalleryManager.render(); }
+
+// ════════════════════════════════════════════════════════════════════════════
 //  Eventos de UI
 // ════════════════════════════════════════════════════════════════════════════
 function wireEvents() {
@@ -1578,6 +1965,8 @@ function wireEvents() {
     const action = btn.dataset.action;
 
     if (action === "toggleHistory")     toggleHistory();
+    if (action === "openGallery")       GalleryManager.toggle();
+    if (action === "toggleLayout")      toggleChatLayout();
     if (action === "toggleMiniHistory") toggleMiniHistory();
     if (action === "toggleHelp")        toggleHelp();
     if (action === "toggleProfile")     toggleProfile();
@@ -1673,6 +2062,51 @@ function wireEvents() {
   }
   $("#closeApiModalBtn")?.addEventListener("click", () => openApiStatusModal(false));
   $("#refreshApiStatusBtn")?.addEventListener("click", () => fetchApiStatus());
+  $("#saveAtlasKeyBtn")?.addEventListener("click", async () => {
+    const input = $("#atlasApiKeyInput");
+    const msg = $("#saveAtlasKeyMsg");
+    const val = input?.value?.trim();
+    if (!val) {
+      if (msg) {
+        msg.style.display = "block";
+        msg.style.color = "#ef4444";
+        msg.textContent = "Por favor, insira uma chave válida.";
+      }
+      return;
+    }
+    if (msg) {
+      msg.style.display = "block";
+      msg.style.color = "#6366f1";
+      msg.textContent = "Validando chave com a Atlas Cloud...";
+    }
+    try {
+      const res = await fetch("/api/config/atlas-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: val })
+      });
+      const data = await res.json();
+      if (res.ok && data.connected) {
+        if (msg) {
+          msg.style.color = "#10b981";
+          msg.textContent = "✔ Chave salva e conexão com a Atlas Cloud confirmada com sucesso!";
+        }
+        if (input) input.value = "";
+        fetchApiStatus();
+      } else {
+        if (msg) {
+          msg.style.color = "#ef4444";
+          msg.textContent = `❌ ${data.message || data.error || "Falha ao validar a chave na Atlas Cloud."}`;
+        }
+        fetchApiStatus();
+      }
+    } catch (e) {
+      if (msg) {
+        msg.style.color = "#ef4444";
+        msg.textContent = `❌ Erro de conexão com o servidor: ${e.message}`;
+      }
+    }
+  });
   $("#apiModalBackdrop")?.addEventListener("click", (e) => {
     if (e.target === $("#apiModalBackdrop")) openApiStatusModal(false);
   });
@@ -1704,6 +2138,46 @@ function wireEvents() {
   });
   $("#promptModalBackdrop")?.addEventListener("click", (e) => {
     if (e.target === $("#promptModalBackdrop")) openPromptModal(false);
+  });
+
+  // Eventos do Modal da Galeria de Vídeos (Reconstruído do Zero)
+  const chatGalleryBtn = document.getElementById("chatGalleryBtn") || $("#chatGalleryBtn");
+  chatGalleryBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    GalleryManager.toggle();
+  });
+
+  $("#openGalleryBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    GalleryManager.toggle();
+  });
+
+  $("#closeGalleryModalBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    GalleryManager.close();
+  });
+
+  $("#closeGalleryModalFooterBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    GalleryManager.close();
+  });
+
+  $("#galleryModalBackdrop")?.addEventListener("click", (e) => {
+    if (e.target === $("#galleryModalBackdrop") || e.target.id === "galleryModalBackdrop") {
+      e.preventDefault();
+      GalleryManager.close();
+    }
+  });
+
+  // Fecha o modal da galeria ao pressionar a tecla Escape
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && GalleryManager.isOpen()) {
+      GalleryManager.close();
+    }
   });
 
   // Botão discreto de anexo de foto
@@ -1831,22 +2305,22 @@ async function fetchApiStatus() {
 
 function updateApiStatusUI(data) {
   const gemini = data?.gemini || {};
-  const magicHour = data?.magicHour || {};
+  const atlas = data?.atlascloud || data?.magicHour || {};
 
   const dot = $("#apiStatusDot");
   const text = $("#apiStatusText");
 
   const geminiConnected = gemini.connected;
-  const magicHourConnected = magicHour.connected;
+  const atlasConnected = atlas.connected;
 
   if (dot && text) {
-    if (geminiConnected && magicHourConnected) {
+    if (geminiConnected && atlasConnected) {
       dot.className = "api-dot connected";
       text.textContent = "APIs OK";
     } else if (geminiConnected) {
       dot.className = "api-dot connected";
       text.textContent = "Gemini OK";
-    } else if (magicHourConnected) {
+    } else if (atlasConnected) {
       dot.className = "api-dot error";
       text.textContent = "Sem Gemini";
     } else {
@@ -1855,7 +2329,7 @@ function updateApiStatusUI(data) {
     }
   }
 
-  // Atualiza modal de diagnóstico
+  // Atualiza modal de diagnóstico para Gemini
   const gDot = $("#geminiCardDot");
   const gBadge = $("#geminiCardBadge");
   const gMsg = $("#geminiCardMsg");
@@ -1873,21 +2347,22 @@ function updateApiStatusUI(data) {
     gMsg.textContent = gemini.message || (geminiConnected ? "Conexão ativa com o Gemini!" : "Servidor sem chave GEMINI_API_KEY ou com falha de conexão.");
   }
 
-  const mhDot = $("#magicHourCardDot");
-  const mhBadge = $("#magicHourCardBadge");
-  const mhMsg = $("#magicHourCardMsg");
+  // Atualiza modal de diagnóstico para Atlas Cloud (Seedance 2.0 Mini)
+  const aDot = $("#atlasCloudCardDot") || $("#magicHourCardDot");
+  const aBadge = $("#atlasCloudCardBadge") || $("#magicHourCardBadge");
+  const aMsg = $("#atlasCloudCardMsg") || $("#magicHourCardMsg");
 
-  if (mhDot && mhBadge && mhMsg) {
-    if (magicHourConnected) {
-      mhDot.className = "api-card__dot connected";
-      mhBadge.className = "api-card__badge connected";
-      mhBadge.textContent = "Conectado";
+  if (aDot && aBadge && aMsg) {
+    if (atlasConnected) {
+      aDot.className = "api-card__dot connected";
+      aBadge.className = "api-card__badge connected";
+      aBadge.textContent = "Conectado";
     } else {
-      mhDot.className = "api-card__dot error";
-      mhBadge.className = "api-card__badge error";
-      mhBadge.textContent = "Desconectado";
+      aDot.className = "api-card__dot error";
+      aBadge.className = "api-card__badge error";
+      aBadge.textContent = atlas.keyConfigured ? "Falha na Chave" : "Sem Chave";
     }
-    mhMsg.textContent = magicHour.message || (magicHourConnected ? "Chave configurada" : "Servidor sem chave MAGIC_HOUR_API_KEY.");
+    aMsg.textContent = atlas.message || (atlasConnected ? "Conexão ativa com a Atlas Cloud!" : "Configure a chave ATLASCLOUD_API_KEY abaixo ou no arquivo .env");
   }
 }
 

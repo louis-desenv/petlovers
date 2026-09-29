@@ -5,6 +5,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const atlasCloudService = require("./src/services/atlasCloudService");
 try { require("dotenv").config(); } catch (e) {}
 
 // Função auxiliar para limpar chaves de API carregadas do .env ou process.env
@@ -90,12 +91,6 @@ try {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// ==========================================
-// CHAVE DE API DA MAGIC HOUR (CONFIGURAÇÃO)
-// Troque a chave abaixo sempre que necessário
-// ==========================================
-const MAGIC_HOUR_API_KEY = "mhk_live_hqrI27aSFI21y0dTp8w0EDWqeFdnH7CnILLNymFreVw156uQ3z7GQmN2KtEkFSa47EA5X2lgUFwrZWWR";
-
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
@@ -111,17 +106,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// URLs dos vídeos pré-renderizados para sentimentos específicos no Magic Hour
+// URLs dos vídeos pré-renderizados para sentimentos específicos do mascote Dr. Miau
 const videoUrls = {
-  bem_vindo: "https://videos.magichour.ai/cmqi77bif00ao340z3mlv4sfq/output.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=web-service%40magic-hour-385504.iam.gserviceaccount.com%2F20260617%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260617T153121Z&X-Goog-Expires=43200&X-Goog-SignedHeaders=host&X-Goog-Signature=533f8c5f5df4ad01ae263fa646a71ff36ea1fabf3b4a092b9ac7866284ac4c14f5eb7cd8b4c763b00c744243d435bfc728ecc10d9532daf10631e77a9d5b0c93d042d055f6bbc52ce0beaacd706d12f800e64b2833c52d559db48930eddf758425df57e42a76b8ac07532928ccab4d054e56d5664c82a60535c5684f6a387b6a019e79a1b52e68c3ca65c6b353ea2dc73a71e8acb8f351a449552882a8514b758a6ec7e485d0059143fa2edd75cd23d55af247c3fe1f48d9310634b554c08ea32931da3605451f302f73136f56638079bed4cb48a15d6a2757490e15e1fb2d8ee70198c5b6962e3bef561b282e5d6dea50a4b40355dfc7e0b949333626e53125",
-  normal: "https://videos.magichour.ai/cmqi7cevi00aa1q0zkob3xvk8/output.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=web-service%40magic-hour-385504.iam.gserviceaccount.com%2F20260617%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260617T153121Z&X-Goog-Expires=43200&X-Goog-SignedHeaders=host&X-Goog-Signature=51a21e8cbd1c2e654d697e04c93e358622b10cac70656ce627de240d9e7615fa6a185c8adc679858028a1207304316daf03177a8d626707d3f6d2078e42595ad379b25b39a44cff7ea1d5bb7042fec9034918acd17dab7f299e7d6812b57ed8326a8d405af29113f734fe0419b336c16c5a3f049fad8f7169572e724ad8f23ff24efb752dbc82519de9536db8e9ef051cba03656504841513956f6f2362adaf2eda19c066e8604bdbbbf39f005e4a24df8e485cd03dc2ce02fc3c11230431f6dc26c1c0bd3d520fe39a59029f55678f857b001ee1b67124c43132386748f9bc741e975daac2c08d55d51ce91901e7ac86a80c8eafb03e3e9c7337fee2ffadf9c",
-  feliz: "https://videos.magichour.ai/cmqi79lg204s72z0zqn8abte1/output.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=web-service%40magic-hour-385504.iam.gserviceaccount.com%2F20260617%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260617T153121Z&X-Goog-Expires=43200&X-Goog-SignedHeaders=host&X-Goog-Signature=2d36b207dda51daed476fd0b312a2f0c29bdacd29834f5907e8e066314fa8f6a98a25a95aa4eba53b6e5e7fd6737a0cffd6f18f3b9f86acc88c4a052c05f83ba50b80d2479172db6cf197e659bbd212bdf3e6f724beb08d8b283c3fb38ded79c6197a18cfdb0ec8d61c8bcfddb01a829f17a4b7c247813e9109baf06df60caded900062f11297d4f70ed30250f7a9b093703524bd29cbf27a610dd556f709d3a5cd307354b5a17b4ff52de067f63db7742409c56ea826956952a58b00bb2eefb843bb47e10587c3b5b22a09e75c787bb019acf10e6c37471fb1f921212edca62c69527fc7d7483f82a60898e3f4952491ff489b97c9f0e98e2a7c8e888e96884",
-  triste: "https://videos.magichour.ai/cmqi75kf70011y50ztgq9nm16/output.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=web-service%40magic-hour-385504.iam.gserviceaccount.com%2F20260617%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260617T153121Z&X-Goog-Expires=43200&X-Goog-SignedHeaders=host&X-Goog-Signature=37ab787e416f7c9415e751c50a9c9157486b87f5c1afe2344c71d6fac91ad71afafa499cdcc9589f37d7f8f6a8a7959390f163e19038c3ff85b488018f80cd7422b5b9ebe4c3cd74a706ed3170b5d17239078bd25ec5fe3e5b5e2af6a9b4f96f198334bd9f30b2468cfcc034f7f26ba39f78a47ba7cfb90167d6e3d677815f231aa65ac917d3456cd91aed7906b1aa547449c7e95030280762b74144832e82832dc318a25b7ac18fb81c5be67e235f28ca328749c99b96fcc36548d224d3c04dd45940a2a8c016c515297b0a4a7f8c37c8b9464f72083d55b249e406a68d7d267b0f1ced95d41d66c2e7074bb9c9cb1fd4cefd44f6eb3995f80d97d137c4d566",
-  raiva: "https://videos.magichour.ai/cmqi7hsjn00cm340zpo151fwp/output.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=web-service%40magic-hour-385504.iam.gserviceaccount.com%2F20260617%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260617T153121Z&X-Goog-Expires=43200&X-Goog-SignedHeaders=host&X-Goog-Signature=9c5953409be597ea48e3a7310a5153bd45d4fda90598bfc3acfac77e941ccbd71ac1e998fe220c5cf8767bde4b09f6401bff05d8d22282f21098d4f971634eab39155d94e16002f6d96efc64946a11b3c1e49bc0bae04140a7e41ba8c8f11f945362a6a31b3cae5a204bf3085d49869a2a4e0f5b08cf8b35d1e40b61b77d690a67016d7e267738c3687150ed6a8861f25b71727cd420ce98e6a3c692e69b4bba9d8240e32ce65b32cc139acabb4e66b1aa8607533001a87de477691331340a707ddd55b496f7206fe9cadac73264d480175d24d1faa9f90826028013fcba964d01a1e25346f3d2043e2ede7c5f3e200d0b11101c7f6ec14c2b8c2165308edd75"
+  bem_vindo: "/videos/bemvindo1.mp4",
+  normal: "/videos/normal.mp4",
+  feliz: "/videos/feliz.mp4",
+  triste: "/videos/triste.mp4",
+  raiva: "/videos/raiva.mp4",
+  confuso: "/videos/confuso1.mp4"
 };
 
-// Histórico do último prompt gerado para o Magic Hour (para inspeção e testes)
-let lastMagicHourPromptInfo = {
+// Histórico do último prompt gerado para o estúdio de vídeo
+let lastVideoPromptInfo = {
   prompt: null,
   timestamp: null,
   jobId: null,
@@ -204,37 +200,9 @@ function getCurrentKey() {
   return "";
 }
 
-function getMagicHourKey() {
-  const candidateKeys = [
-    "MAGIC_HOUR_API_KEY",
-    "MAGICHOUR_API_KEY",
-    "MAGIC_HOUR_KEY",
-    "MAGICHOUR_KEY"
-  ];
-
-  for (const k of candidateKeys) {
-    if (process.env[k]) {
-      const cleaned = cleanApiVal(process.env[k]);
-      if (cleaned && !cleaned.includes("sua_chave_aqui")) return cleaned;
-    }
-  }
-
-  if (MAGIC_HOUR_API_KEY && !MAGIC_HOUR_API_KEY.includes("sua_chave_aqui")) {
-    return cleanApiVal(MAGIC_HOUR_API_KEY);
-  }
-
-  for (const k of candidateKeys) {
-    const fileVal = getEnvFileVar(k);
-    if (fileVal && !fileVal.includes("sua_chave_aqui")) return fileVal;
-  }
-
-  return "";
-}
-
 // Função de diagnóstico de status das APIs
 async function checkApiStatuses() {
   const geminiKey = getCurrentKey();
-  const magicHourKey = getMagicHourKey();
 
   const status = {
     gemini: {
@@ -244,19 +212,12 @@ async function checkApiStatuses() {
       error: null,
       message: ""
     },
-    magicHour: {
-      keyConfigured: !!magicHourKey && !magicHourKey.includes("sua_chave_aqui"),
-      connected: false,
-      keyPreview: magicHourKey && !magicHourKey.includes("sua_chave_aqui") ? magicHourKey.slice(0, 6) + "..." : "NÃO CONFIGURADA",
-      error: null,
-      message: ""
-    },
     timestamp: new Date().toISOString()
   };
 
   if (!geminiKey) {
     status.gemini.error = "GEMINI_API_KEY_MISSING";
-    status.gemini.message = "A variável GEMINI_API_KEY não foi encontrada. No Railway: acesse seu serviço > aba Variables > adicione GEMINI_API_KEY com sua chave do Google AI Studio.";
+    status.gemini.message = "A variável GEMINI_API_KEY não foi encontrada. Adicione GEMINI_API_KEY com sua chave do Google AI Studio.";
   } else {
     const testModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
     let pingSuccess = false;
@@ -304,38 +265,17 @@ async function checkApiStatuses() {
     }
   }
 
-  if (!magicHourKey || magicHourKey.includes("sua_chave_aqui")) {
-    status.magicHour.error = "MAGIC_HOUR_KEY_MISSING";
-    status.magicHour.message = "A variável MAGIC_HOUR_API_KEY não foi configurada. Adicione MAGIC_HOUR_API_KEY nas variáveis do Railway para permitir geração de vídeos 3D.";
-  } else {
-    try {
-      const mhRes = await fetch("https://api.magichour.ai/v1/account", {
-        headers: { "Authorization": `Bearer ${magicHourKey}` }
-      });
-      if (mhRes.ok) {
-        const mhData = await mhRes.json();
-        status.magicHour.connected = true;
-        status.magicHour.credits = typeof mhData.credits === "number" ? mhData.credits : null;
-        status.magicHour.email = mhData.email || null;
-        status.magicHour.message = `Conexão com a API Magic Hour estabelecida! Saldo disponível: ${mhData.credits ?? "OK"} créditos. 🎬`;
-      } else if (mhRes.status === 401) {
-        status.magicHour.connected = false;
-        status.magicHour.error = "MAGIC_HOUR_401_UNAUTHORIZED";
-        status.magicHour.message = "Chave MAGIC_HOUR_API_KEY inválida ou incorreta (HTTP 401). Verifique a chave no painel do Magic Hour.";
-      } else if (mhRes.status === 402) {
-        status.magicHour.connected = false;
-        status.magicHour.error = "MAGIC_HOUR_402_NO_CREDITS";
-        status.magicHour.message = "Chave Magic Hour válida, porém sem créditos suficientes para gerar novos vídeos (HTTP 402).";
-      } else {
-        status.magicHour.connected = true;
-        status.magicHour.message = `Chave Magic Hour configurada no servidor (HTTP ${mhRes.status}). 🎬`;
-      }
-    } catch (mhErr) {
-      status.magicHour.connected = false;
-      status.magicHour.error = "MAGIC_HOUR_FETCH_FAILED";
-      status.magicHour.message = `Erro ao conectar na API Magic Hour: ${mhErr.message}`;
-    }
-  }
+  const atlasStatus = await atlasCloudService.testConnection();
+  status.atlascloud = {
+    keyConfigured: atlasStatus.configured,
+    connected: atlasStatus.connected,
+    error: atlasStatus.error,
+    model: "bytedance/seedance-2.0-mini/reference-to-video",
+    resolution: "720p",
+    duration: "15s",
+    message: atlasStatus.message
+  };
+  status.magicHour = status.atlascloud;
 
   return status;
 }
@@ -791,26 +731,26 @@ function translateToEnglishCinematicTerms(petType, petBreed, coatColor, scenario
     }
   }
 
-  // Mapeamento de cores
+  // Mapeamento de cores (Continuity Tokens)
   const colorMap = {
-    "vermelho": "radiant ruby red and vibrant shimmering scales",
-    "vermelha": "radiant ruby red and vibrant shimmering scales",
+    "vermelho": "radiant ruby red with shimmering highlights",
+    "vermelha": "radiant ruby red with shimmering highlights",
     "azul": "vibrant royal blue with glowing tones",
-    "amarelo": "bright sunny golden yellow",
-    "dourado": "shimmering metallic gold",
-    "preto": "sleek velvety midnight black",
-    "branco": "pure snowy white",
-    "laranja": "warm bright glowing orange",
-    "caramelo": "warm golden caramel",
-    "marrom": "rich warm chocolate brown",
-    "cinza": "soft silver grey",
+    "amarelo": "bright sunny golden yellow coat",
+    "dourado": "shimmering metallic golden coat",
+    "preto": "sleek velvety midnight black fur",
+    "branco": "pure snowy white fluffy coat",
+    "laranja": "warm bright glowing orange coat",
+    "caramelo": "warm golden caramel fur",
+    "marrom": "rich warm chocolate brown fur",
+    "cinza": "soft silver grey coat",
     "rajado": "expressive striped tabby pattern",
     "malhado": "spotted charming coat",
     "tricolor": "colorful three-tone pattern"
   };
 
   const rawColor = (coatColor || "").toLowerCase().trim();
-  let enColor = "vibrant beautiful colors";
+  let enColor = "vibrant locked physical colors";
   for (const [pt, en] of Object.entries(colorMap)) {
     if (rawColor.includes(pt)) {
       enColor = en;
@@ -818,39 +758,41 @@ function translateToEnglishCinematicTerms(petType, petBreed, coatColor, scenario
     }
   }
 
-  // Mapeamento de cenário
-  let enScenario = "in a charming, cozy, beautifully lit sun-drenched home setting";
+  // Mapeamento de cenário (Setting & Context)
+  let enScenario = "set in a cozy, sun-drenched living room with soft ambient warmth and gentle dust motes in sunbeams";
   const rawScen = (scenarioText || "").toLowerCase().trim();
   if (rawScen.includes("praia") || rawScen.includes("mar") || rawScen.includes("oceano")) {
-    enScenario = "on a stunning sun-kissed tropical beach with sparkling crystal-clear waters and golden sands";
+    enScenario = "set on a tropical sun-kissed golden sand beach during golden hour with gentle turquoise waves in the background";
   } else if (rawScen.includes("floresta") || rawScen.includes("bosque") || rawScen.includes("árvores")) {
-    enScenario = "inside an enchanted magical fairy-tale forest illuminated by soft fireflies and sunbeams";
+    enScenario = "set inside an enchanted magical fairytale forest with bioluminescent mushrooms and soft volumetric god rays filtering through lush canopy";
   } else if (rawScen.includes("jardim") || rawScen.includes("flores") || rawScen.includes("parque")) {
-    enScenario = "in a lush blooming colorful garden overflowing with vibrant magical flowers";
+    enScenario = "set in a lush blooming botanical garden with colorful oversized flowers and fluttering butterflies in warm morning sunlight";
   } else if (rawScen.includes("espaço") || rawScen.includes("espaco") || rawScen.includes("galáxia") || rawScen.includes("estrelas")) {
-    enScenario = "floating weightlessly through a breathtaking cosmic galaxy surrounded by glittering stars and colorful nebulae";
+    enScenario = "set in a breathtaking cosmic space scene with glowing nebula clouds, twinkling distant stars, and weightless atmospheric physics";
   } else if (rawScen.includes("castelo") || rawScen.includes("reino")) {
-    enScenario = "inside a grand enchanted royal fantasy castle hall with warm glowing chandeliers";
+    enScenario = "set inside a grand fantasy castle hall with royal velvet drapery, warm torchlight, and marble floors";
   } else if (rawScen.includes("cidade") || rawScen.includes("casa") || rawScen.includes("sala")) {
     enScenario = rawType.includes("peixe") 
-      ? "inside a cozy modern sunlit home, swimming joyfully in a sparkling crystal-clear decorated aquarium" 
-      : "inside a warm sunlit cozy modern living room with soft comfortable aesthetic decor";
+      ? "set inside a crystal-clear modern sunlit glass aquarium decorated with miniature colorful coral structures and glowing water ripples" 
+      : "set inside a warm sunlit Scandinavian living room with soft aesthetic decor and cozy ambient light";
   }
 
-  // Mapeamento de ação
-  let enAction = "enjoying a wonderful joyful moment with lively expressive animations";
+  // Mapeamento de ação (Subject & Action ao longo de 5 segundos)
+  let enAction = "performing a joyful 5-second dynamic movement with fluid natural body animation and expressive facial reactions";
   const rawAct = (actionText || "").toLowerCase().trim();
   if (rawType.includes("peixe")) {
-    enAction = "swimming with graceful joyful acrobatic spins and blowing magical glowing water bubbles";
+    enAction = "swimming gracefully in a smooth 360-degree loop, blowing glowing bubble streams and doing an acrobatic tail spin";
   } else if (rawAct.includes("correr") || rawAct.includes("correndo") || rawAct.includes("brincar")) {
-    enAction = "running happily and bouncing around with boundless excitement and pure joy";
+    enAction = "running happily towards the camera in a bouncy rhythm, wagging tail and showing delighted expressive eyes";
   } else if (rawAct.includes("dormir") || rawAct.includes("soneca") || rawAct.includes("deitado")) {
-    enAction = "curled up cozily taking a peaceful sweet nap with soft gentle breathing animations";
+    enAction = "curled up comfortably, taking a sweet peaceful nap with soft rhythmic chest breathing and occasional ear twitches";
   } else if (rawAct.includes("skate") || rawAct.includes("voar") || rawAct.includes("heroi") || rawAct.includes("herói")) {
-    enAction = "performing dynamic energetic heroic moves with playful cinematic flair";
+    enAction = "performing an energetic heroic glide forward with playful confidence, dynamic wind effects, and proud pose";
   }
 
-  return `A breathtaking 3D Pixar-Disney style cinematic animation of an adorable ${enPetType} named ${name} with ${enColor}, ${enAction} ${enScenario}. Soft volumetric lighting, expressive facial animation, joyful and whimsical mood, ultra-detailed 8k render, masterpiece cinematography.`;
+  const cameraMotion = "Medium eye-level shot, smooth low-angle dolly push tracking shot following the character motion.";
+
+  return `[Subject & Action]: High-end 3D animation featuring ${enPetType} named ${name}, ${enAction} over 5 seconds. [Setting & Context]: ${enScenario}. [Camera Shot & Motion]: ${cameraMotion} [Continuity Tokens]: Physical attributes locked with ${enColor}, maintaining strict anatomical feature consistency without morphing. [Style & Lighting]: 3D Pixar-Disney cinematic style, volumetric rim lighting, Octane render 8k detail, 720p 1:1 square ratio. [Negative Prompt]: Avoid extra limbs, deformed face, character morphing, text, watermarks, chaotic motion, flickering artifacts.`;
 }
 
 function analyzePetProfile(history = [], currentMessage = "") {
@@ -1260,7 +1202,7 @@ function analyzePetProfile(history = [], currentMessage = "") {
   };
 }
 
-function evaluateConversationState(history = [], currentMessage = "") {
+function evaluateConversationState(history = [], currentMessage = "", sessionState = null) {
   const userTexts = [];
   if (Array.isArray(history)) {
     history.forEach(h => {
@@ -1316,16 +1258,9 @@ function evaluateConversationState(history = [], currentMessage = "") {
   });
   const combinedUserTextClean = userTextsClean.join(" ");
 
-  // 1. ANÁLISE DE CENÁRIO (FASE 2)
-  const scenarioKeywords = [
-    "praia", "floresta", "espaço", "espaco", "castelo", "nuvens", "mar", "montanha",
-    "parte 2 - o cenário", "universo", "lua", "planeta", "neve", "piscina", "mundo de doces",
-    "cidade", "campo", "campo de flores", "reino", "na praia", "na floresta", "no espaço", "no castelo",
-    "no jardim", "no cenario", "no cenário", "cenário de", "cenario de", "fundo de", "quero na", "quero no",
-    "sala", "quarto", "cozinha", "parque", "quintal", "rua", "casa", "lago", "rio", "fazenda",
-    "céu", "ceu", "galáxia", "nave", "arco-íris", "montanhas"
-  ];
-  let hasScenarioDetails = scenarioKeywords.some(kw => combinedUserTextClean.includes(kw));
+  // 1. ANÁLISE DE CENÁRIO (FASE 2) — Só é avaliada se a Fase 1 (Detalhes do Pet) estiver completa
+  let hasScenarioDetails = false;
+  let scenarioTurnIndex = -1;
 
   // Turns do diálogo para inferência contextual
   const turns = [];
@@ -1343,12 +1278,22 @@ function evaluateConversationState(history = [], currentMessage = "") {
     turns.push({ role: "user", text: currentMessage });
   }
 
-  let scenarioTurnIndex = -1;
+  // Palavras-chave específicas e inequívocas de cenário
+  const explicitScenarioKeywords = [
+    "praia", "floresta", "espaço", "espaco", "castelo", "nuvens", "mar", "montanha",
+    "parte 2 - o cenário", "universo", "lua", "planeta", "neve", "piscina", "mundo de doces",
+    "campo verde", "mato alto", "reino", "na praia", "na floresta", "no espaço", "no castelo",
+    "no jardim", "no cenario", "no cenário", "cenário de", "cenario de", "fundo de", "galáxia", "nave"
+  ];
+
+  // Checagem se o assistente perguntou sobre cenário no histórico
+  let assistantAskedScenario = false;
   for (let i = 0; i < turns.length - 1; i++) {
     const t = turns[i];
     const next = turns[i + 1];
     if (t.role === "assistant" && next.role === "user") {
-      if (/(?:cen[aá]rio|lugar|ambiente|onde\s+(?:voc[êe]\s+)?gostaria|em\s+qual\s+(?:lugar|cen[aá]rio))/i.test(t.text)) {
+      if (/(?:cen[aá]rio|lugar|ambiente|onde\s+(?:voc[êe]\s+)?gostaria|em\s+qual\s+(?:lugar|cen[aá]rio)|fase\s+2)/i.test(t.text)) {
+        assistantAskedScenario = true;
         if (next.text && next.text.trim().length >= 2) {
           hasScenarioDetails = true;
           scenarioTurnIndex = i + 1;
@@ -1358,53 +1303,54 @@ function evaluateConversationState(history = [], currentMessage = "") {
     }
   }
 
-  // 2. ANÁLISE DE AÇÃO (FASE 3) — ACEITA QUALQUER COISA QUE O TUTOR DISSER!
-  let hasActionDetails = false;
-
-  // Se o assistente perguntou sobre a ação do vídeo, QUALQUER resposta do usuário é aceita!
-  for (let i = 0; i < turns.length - 1; i++) {
-    const t = turns[i];
-    const next = turns[i + 1];
-    if (t.role === "assistant" && next.role === "user") {
-      if (/(?:qual\s+a[çc][ãa]o|a[çc][ãa]o\s+voc[êe]\s+gostaria|fazendo\s+no\s+v[íi]deo|o\s+que\s+gostaria\s+de\s+ver|qualquer\s+a[çc][ãa]o|o\s+que\s+ele\s+vai\s+fazer|que\s+a[çc][ãa]o|fazendo\s+o\s+que|o\s+que\s+voc[êe]\s+gostaria\s+de\s+ver\s+o)/i.test(t.text)) {
-        if (next.text && next.text.trim().length >= 2) {
-          hasActionDetails = true;
-          break;
-        }
+  // Se a Fase 1 estiver completa (ou o assistente perguntou sobre cenário), aceita palavras-chave específicas de cenário
+  if (hasPetDetails || assistantAskedScenario) {
+    if (!hasScenarioDetails && explicitScenarioKeywords.some(kw => combinedUserTextClean.includes(kw))) {
+      hasScenarioDetails = true;
+    }
+    // Palavras cotidianas (como casa, rua, sala) só valem se a Fase 1 estiver completa E o usuário respondeu à Fase 2
+    if (!hasScenarioDetails && hasPetDetails) {
+      const genericScenarioKeywords = ["sala", "quarto", "cozinha", "parque", "quintal", "rua", "casa", "lago", "rio", "fazenda", "céu", "ceu"];
+      const lastUserTurn = turns.filter(t => t.role === "user").pop();
+      if (lastUserTurn && genericScenarioKeywords.some(kw => lastUserTurn.text.toLowerCase().includes(kw)) && assistantAskedScenario) {
+        hasScenarioDetails = true;
       }
     }
   }
 
-  // Lista ampla de verbos ou palavras de ação (cotidiana, esportiva, mágica, livre)
-  const actionKeywords = [
-    "ação", "acao", "fazendo", "fazer", "brincar", "brincando", "correr", "correndo",
-    "pular", "pulando", "dormir", "dormindo", "comer", "comendo", "explorar", "explorando",
-    "passear", "passeando", "nadar", "nadando", "deitar", "deitando", "farejar", "farejando",
-    "latir", "latindo", "miar", "miando", "rolar", "rolando", "cavar", "cavando", "skate",
-    "andando", "andar", "voar", "voando", "dançar", "dancar", "dançando", "saltar", "saltando",
-    "caçar", "caçando", "morder", "mordendo", "perseguir", "pegando", "pegar", "assistir",
-    "beber", "bebendo", "subir", "subindo", "descer", "descendo", "lutar", "lutando",
-    "salvar", "salvando", "mágica", "magica", "fogo", "raio", "festa", "sorvete", "pizza",
-    "brinquedo", "bola", "bolinha", "laser", "cambalhota", "pirueta", "escondendo", "esconder",
-    "abraçar", "abraçando", "carinho", "soneca", "sonequinha", "cochilar", "destruir", "destruindo",
-    "pilotar", "pilotando", "bicicleta", "bike", "patins", "surfar", "surfando",
-    "superpoder", "super poder", "super-poder", "parte 3 - o vídeo"
-  ];
-  if (!hasActionDetails && actionKeywords.some(kw => combinedUserTextClean.includes(kw))) {
-    hasActionDetails = true;
-  }
+  // 2. ANÁLISE DE AÇÃO (FASE 3) — Só é ativada se a Fase 1 E a Fase 2 já estiverem completas!
+  let hasActionDetails = false;
 
-  // Se o Pet e o Cenário já estão estabelecidos, e o usuário enviou uma mensagem na fase 3:
-  // qualquer resposta é aceita como a ação desejada!
-  if (!hasActionDetails && hasPetDetails && hasScenarioDetails) {
-    if (scenarioTurnIndex !== -1 && scenarioTurnIndex < turns.length - 1) {
-      const subsequentTurns = turns.slice(scenarioTurnIndex + 1).filter(t => t.role === "user");
-      if (subsequentTurns.length > 0) {
+  if (hasPetDetails && hasScenarioDetails) {
+    // Checa se o assistente perguntou sobre a ação do vídeo
+    for (let i = 0; i < turns.length - 1; i++) {
+      const t = turns[i];
+      const next = turns[i + 1];
+      if (t.role === "assistant" && next.role === "user") {
+        if (/(?:qual\s+a[çc][ãa]o|a[çc][ãa]o\s+voc[êe]\s+gostaria|fazendo\s+no\s+v[íi]deo|o\s+que\s+gostaria\s+de\s+ver|qualquer\s+a[çc][ãa]o|o\s+que\s+ele\s+vai\s+fazer|que\s+a[çc][ãa]o|fazendo\s+o\s+que)/i.test(t.text)) {
+          if (next.text && next.text.trim().length >= 2) {
+            hasActionDetails = true;
+            break;
+          }
+        }
+      }
+    }
+
+    const actionKeywords = [
+      "dormindo", "dormir", "correr", "correndo", "pular", "pulando", "voar", "voando",
+      "skate", "andando de skate", "brincar", "brincando", "dançar", "dancar", "dançando",
+      "nadar", "nadando", "caçar", "caçando", "faz o vídeo", "faz o video", "gera o vídeo", "gera o video"
+    ];
+    if (!hasActionDetails && actionKeywords.some(kw => combinedUserTextClean.includes(kw))) {
+      hasActionDetails = true;
+    }
+
+    // Se Pet e Cenário já foram estabelecidos e o usuário enviou uma mensagem nova na fase 3
+    if (!hasActionDetails && currentMessage && currentMessage.trim().length >= 2) {
+      const lastAssistantTurn = turns.filter(t => t.role === "assistant").pop();
+      if (lastAssistantTurn && /(?:a[çc][ãa]o|fazendo|fazer|vídeo|video)/i.test(lastAssistantTurn.text)) {
         hasActionDetails = true;
       }
-    } else if (currentMessage && currentMessage.trim().length >= 2) {
-      // Se já temos o cenário nos textos anteriores e a mensagem atual é um input válido
-      hasActionDetails = true;
     }
   }
 
@@ -1415,7 +1361,7 @@ function evaluateConversationState(history = [], currentMessage = "") {
   let canTriggerVideo = false;
 
   // CÁLCULO ESTRITO DE PROGRESSO E FASE:
-  // Enquanto qualquer parâmetro do pet estiver faltando, NUNCA sai da Fase 1
+  // Enquanto a Fase 1 não estiver completa, NUNCA sai da Fase 1
   if (!hasPetDetails) {
     maxAllowedPhase = 1;
     let completedCount = 0;
@@ -1426,18 +1372,21 @@ function evaluateConversationState(history = [], currentMessage = "") {
     if (petProfile.hasAvariacao) completedCount++;
     suggestedProgress = 5 + (completedCount * 6); // 5% a 35%
     canTriggerVideo = false;
+    hasScenarioDetails = false;
+    hasActionDetails = false;
   } else if (!hasScenarioDetails) {
     // Pet 100% conhecido, mas cenário ainda não definido: FASE 2
     maxAllowedPhase = 2;
-    suggestedProgress = 50;
+    suggestedProgress = 55;
     canTriggerVideo = false;
+    hasActionDetails = false;
   } else if (!hasActionDetails) {
     // Cenário definido, mas ação ainda não definida: FASE 3
     maxAllowedPhase = 3;
     suggestedProgress = 80;
     canTriggerVideo = false;
   } else {
-    // Pet, Cenário e Ação todos definidos!
+    // Pet, Cenário e Ação todos definidos em ordem!
     maxAllowedPhase = 3;
     suggestedProgress = 100;
     canTriggerVideo = true;
@@ -1712,79 +1661,29 @@ app.post("/api/analyze-image", async (req, res) => {
   }
 });
 
-// Função de suporte para iniciar a geração de vídeos na API Magic Hour
-async function triggerMagicHourGeneration(prompt) {
-  const apiKey = (getMagicHourKey() || "").trim();
-  console.log(`[Magic Hour Trigger] Iniciando requisição para https://api.magichour.ai com prompt: "${prompt}"`);
+// Função de suporte para iniciar a geração de vídeos na API ElevenLabs (Modelo Seedance 2.5)
+async function triggerElevenLabsVideoGeneration(prompt) {
+  const apiKey = (getElevenLabsKey() || "").trim();
+  console.log(`[ElevenLabs Seedance 2.5 Trigger] Iniciando geração de vídeo com ElevenLabsService: "${prompt}"`);
   
-  if (!apiKey || apiKey.includes("sua_chave_aqui")) {
-    const err = new Error("MAGIC_HOUR_KEY_MISSING: A chave MAGIC_HOUR_API_KEY não foi configurada no ambiente do servidor (Vercel).");
-    err.code = "MAGIC_HOUR_KEY_MISSING";
+  if (!apiKey) {
+    const err = new Error("ELEVENLABS_KEY_MISSING: A chave ELEVENLABS_API_KEY não foi configurada no ambiente do servidor.");
+    err.code = "ELEVENLABS_KEY_MISSING";
     throw err;
   }
 
-  const payload = {
-    name: "Dr Miau Video",
-    style: {
-      type: "text_to_video",
-      prompt: prompt,
-      aspect_ratio: "1:1"
-    },
-    aspect_ratio: "1:1",
-    end_seconds: 2,
-    height: 512,
-    width: 512,
-    fps: 15,
-    end_to_end: true
+  const client = new ElevenLabsService(apiKey);
+  const result = await client.generatePetAnimation(prompt);
+
+  lastVideoPromptInfo = {
+    prompt: prompt,
+    timestamp: new Date().toISOString(),
+    jobId: result.id,
+    status: result.status,
+    download_url: result.download_url
   };
-  
-  let response;
-  try {
-    response = await fetch("https://api.magichour.ai/v1/text-to-video", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-  } catch (fetchErr) {
-    const err = new Error(`MAGIC_HOUR_FETCH_FAILED: Erro de conexão de rede ao acessar api.magichour.ai: ${fetchErr.message}`);
-    err.code = "MAGIC_HOUR_FETCH_FAILED";
-    throw err;
-  }
-  
-  if (!response.ok) {
-    const errText = await response.text();
-    let code = `MAGIC_HOUR_HTTP_${response.status}`;
-    if (response.status === 401) code = "MAGIC_HOUR_AUTH_401 (Chave inválida)";
-    if (response.status === 402) code = "MAGIC_HOUR_QUOTA_402 (Sem saldo/créditos)";
-    if (response.status === 422) code = "MAGIC_HOUR_PARAMS_422 (Parâmetros inválidos)";
 
-    const err = new Error(`[${code}] Erro na API Magic Hour (HTTP ${response.status}): ${errText}`);
-    err.code = code;
-    throw err;
-  }
-  
-  try {
-    const data = await response.json();
-    console.log(`[Magic Hour Trigger] Sucesso! Job ID: ${data.id}, Status: ${data.status}`);
-    
-    // Atualiza o último prompt gerado para inspeção
-    lastMagicHourPromptInfo = {
-      prompt: prompt,
-      timestamp: new Date().toISOString(),
-      jobId: data.id,
-      status: data.status,
-      payload: payload
-    };
-
-    return data;
-  } catch (jsonErr) {
-    const err = new Error(`MAGIC_HOUR_BAD_JSON: Resposta JSON inválida retornada pela API: ${jsonErr.message}`);
-    err.code = "MAGIC_HOUR_BAD_JSON";
-    throw err;
-  }
+  return result;
 }
 
 // Rota de Healthcheck
@@ -1792,24 +1691,24 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Rota para consultar o último prompt enviado ao Magic Hour
+// Rota para consultar o último prompt enviado ao gerador de vídeo
 app.get("/api/last-prompt", (req, res) => {
-  res.json(lastMagicHourPromptInfo);
+  res.json(lastVideoPromptInfo);
 });
 
 // Rota para resetar o último prompt gerado quando o usuário inicia nova conversa
 app.post("/api/reset-prompt", (req, res) => {
-  lastMagicHourPromptInfo = {
+  lastVideoPromptInfo = {
     prompt: null,
     timestamp: null,
     jobId: null,
     status: null
   };
-  console.log("[Prompt Reset] Histórico de prompt Magic Hour limpo com sucesso.");
+  console.log("[Prompt Reset] Histórico de prompt de vídeo limpo com sucesso.");
   res.json({ success: true });
 });
 
-// Rota de Diagnóstico de Conexão das APIs (Gemini e Magic Hour)
+// Rota de Diagnóstico de Conexão das APIs (Gemini e ElevenLabs)
 app.get("/api/status", async (req, res) => {
   try {
     const status = await checkApiStatuses();
@@ -1824,118 +1723,111 @@ app.get("/api/videos", (req, res) => {
   res.json(videoUrls);
 });
 
-// Rota para consultar o status de um vídeo gerado pelo Magic Hour
+// Rota para consultar o status de um vídeo gerado pela Atlas Cloud
 app.get("/api/video-status/:id", async (req, res) => {
   const jobId = req.params.id;
-  const apiKey = getMagicHourKey();
-  console.log(`[Magic Hour Poll] Verificando status do vídeo: ${jobId}`);
-
-  if (!apiKey || apiKey.includes("sua_chave_aqui")) {
-    return res.status(400).json({ error: "MAGIC_HOUR_KEY_MISSING", status: "failed" });
-  }
-
-  const candidateEndpoints = [
-    `https://api.magichour.ai/v1/video-projects/${jobId}`,
-    `https://api.magichour.ai/v1/text-to-video/${jobId}`,
-    `https://api.magichour.ai/v1/ai-video/${jobId}`,
-    `https://api.magichour.ai/v1/image-to-video/${jobId}`
-  ];
-
   try {
-    let successfulData = null;
-    let lastErrorText = "";
-
-    for (const url of candidateEndpoints) {
-      try {
-        const response = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          }
-        });
-
-        if (response.ok) {
-          successfulData = await response.json();
-          break;
-        } else {
-          lastErrorText = await response.text();
-          if (response.status !== 404) {
-            throw new Error(`Magic Hour API HTTP ${response.status}: ${lastErrorText}`);
-          }
-        }
-      } catch (fetchErr) {
-        if (!fetchErr.message.includes("404")) {
-          throw fetchErr;
-        }
-      }
-    }
-
-    if (!successfulData) {
-      throw new Error(`Magic Hour API HTTP 404: ${lastErrorText || "Job não encontrado no Magic Hour"}`);
-    }
-
-    const data = successfulData;
-    console.log(`[Magic Hour Poll] Raw API response for ${jobId}:`, JSON.stringify(data));
-
-    // Normalização robusta de status para alinhar com o frontend
-    let normalizedStatus = "queued";
-    const rawStatus = (data.status || "").toLowerCase();
-
-    if (rawStatus === "complete" || rawStatus === "completed" || rawStatus === "success") {
-      normalizedStatus = "completed";
-    } else if (rawStatus === "rendering" || rawStatus === "processing" || rawStatus === "running") {
-      normalizedStatus = "processing";
-    } else if (rawStatus === "error" || rawStatus === "failed" || rawStatus === "canceled") {
-      normalizedStatus = "failed";
-    } else if (rawStatus === "queued") {
-      normalizedStatus = "queued";
-    } else {
-      normalizedStatus = data.status || "queued";
-    }
-
-    // Extração robusta do link de download
-    let downloadUrl = data.download_url || null;
-    
-    if (!downloadUrl && data.download) {
-      if (typeof data.download === "string") {
-        downloadUrl = data.download;
-      } else if (data.download && data.download.url) {
-        downloadUrl = data.download.url;
-      }
-    }
-
-    if (!downloadUrl && data.downloads) {
-      if (Array.isArray(data.downloads)) {
-        if (data.downloads[0]) {
-          if (typeof data.downloads[0] === 'string') {
-            downloadUrl = data.downloads[0];
-          } else if (data.downloads[0].url) {
-            downloadUrl = data.downloads[0].url;
-          }
-        }
-      } else if (typeof data.downloads === 'object') {
-        downloadUrl = data.downloads.video || data.downloads.url || null;
-      } else if (typeof data.downloads === 'string') {
-        downloadUrl = data.downloads;
-      }
-    }
-
-    console.log(`[Magic Hour Poll] Normalized response -> jobId: ${jobId}, status: ${normalizedStatus}, download_url: ${downloadUrl}`);
-
-    res.json({
-      id: data.id,
-      status: normalizedStatus,
-      download_url: downloadUrl
+    const status = await atlasCloudService.checkVideoTaskStatus(jobId);
+    return res.json({
+      id: jobId,
+      status: status.status,
+      video_url: status.videoUrl,
+      download_url: status.videoUrl,
+      outputs: status.outputs,
+      error: status.error,
+      metrics: status.metrics || null,
+      raw: status.raw || null
     });
   } catch (err) {
-    console.error(`[Magic Hour Poll Error] Erro ao buscar status ${jobId}:`, err);
+    console.error(`[Atlas Cloud Status Error] Erro ao checar status da tarefa ${jobId}:`, err.message);
+    return res.status(err.message === "ATLASCLOUD_API_KEY_MISSING" ? 401 : 500).json({
+      id: jobId,
+      status: "failed",
+      error: err.message
+    });
+  }
+});
+
+// Rota de proxy para streaming e download de vídeo sem problemas de CORS
+app.get("/api/proxy-video", async (req, res) => {
+  const videoUrl = req.query.url;
+  if (!videoUrl || typeof videoUrl !== "string") {
+    return res.status(400).send("URL de vídeo obrigatória");
+  }
+
+  try {
+    const fetchRes = await fetch(videoUrl);
+    if (!fetchRes.ok) {
+      return res.status(fetchRes.status).send(`Erro ao buscar vídeo remoto: ${fetchRes.statusText}`);
+    }
+
+    res.setHeader("Content-Type", fetchRes.headers.get("content-type") || "video/mp4");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    if (fetchRes.headers.get("content-length")) {
+      res.setHeader("Content-Length", fetchRes.headers.get("content-length"));
+    }
+    if (fetchRes.headers.get("accept-ranges")) {
+      res.setHeader("Accept-Ranges", fetchRes.headers.get("accept-ranges"));
+    }
+
+    const arrayBuffer = await fetchRes.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error("❌ Erro no proxy de vídeo:", err.message);
+    return res.status(500).send("Erro interno ao transmitir vídeo");
+  }
+});
+
+// Rota para salvar a chave da Atlas Cloud dinamicamente
+app.post("/api/config/atlas-key", async (req, res) => {
+  try {
+    const { key } = req.body;
+    if (!key || typeof key !== "string" || key.trim().length < 5) {
+      return res.status(400).json({ error: "Chave inválida fornecida." });
+    }
+    atlasCloudService.setAtlasApiKey(key.trim());
+    const testResult = await atlasCloudService.testConnection();
+    res.json(testResult);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rota para disparar a geração de vídeo usando a API Atlas Cloud (bytedance/seedance-2.0-mini/reference-to-video)
+app.post("/api/generate-pet-video", async (req, res) => {
+  try {
+    const { imageUrl, prompt, ratio, aspectRatio, duration, resolution } = req.body;
+
+    const result = await atlasCloudService.generateReferenceVideo({
+      imageUrl: imageUrl || null,
+      prompt: prompt || "An adorable 3D Pixar-style animated pet hero in a magical world, ultra detailed 8k, 16:9 aspect ratio",
+      ratio: ratio || aspectRatio || "16:9",
+      duration: duration || 15,
+      resolution: resolution || "720p"
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error("❌ Erro no endpoint /api/generate-pet-video:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rota para consultar status de uma tarefa da Atlas Cloud
+app.get("/api/pet-video-status/:taskId", async (req, res) => {
+  try {
+    const taskId = req.params.taskId;
+    const status = await atlasCloudService.checkVideoTaskStatus(taskId);
+    res.json(status);
+  } catch (err) {
+    console.error("❌ Erro no endpoint /api/pet-video-status:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // Função centralizada para processar a conversa do Dr. Miau (compatível com chamadas REST normais e Streaming SSE)
-async function processChatRequest({ message, history, onChunk = null }) {
+async function processChatRequest({ message, history, sessionState = null, onChunk = null }) {
   const cleanMsg = (message || "").toLowerCase().trim();
   let shortcutSentiment = null;
   let responseTextOverride = "";
@@ -2009,12 +1901,13 @@ async function processChatRequest({ message, history, onChunk = null }) {
     }
 
     const isDanone = cleanMsg.includes("danone");
+    const evalState = evaluateConversationState(cleanedHistory, message, sessionState || null);
 
     let parsed;
 
     if (isDanone) {
-      console.log(`[Danone Cheat Code] Pulo direto para geração de vídeo ativado!`);
-      const danoneText = "Miau! Código especial Danone ativado! Pulei todas as 3 etapas e estou enviando seu pedido para o estúdio de vídeo agora mesmo! 🚀🎬✨";
+      console.log(`[Danone Cheat Code] Pulo direto para geração de vídeo na Atlas Cloud ativado!`);
+      const danoneText = "Miau! Código especial Danone ativado! Pulei todas as 3 etapas e estou enviando seu pedido para o estúdio Atlas Cloud (Seedance 2.0 Mini) agora mesmo! 🚀🎬✨";
       if (onChunk) {
         onChunk(danoneText);
       }
@@ -2024,7 +1917,7 @@ async function processChatRequest({ message, history, onChunk = null }) {
         phase: 3,
         progress: 100,
         trigger_video_generation: true,
-        video_prompt: `An adorable 3D Pixar-style animated scene of a cute pet hero in a magical world, vibrant lighting, ultra detailed 8k.`
+        video_prompt: `An adorable 3D Pixar-style animated scene of a cute pet hero in a magical world, vibrant lighting, ultra detailed 8k, 16:9 aspect ratio.`
       };
     } else {
       // System instruction atualizada e completa para o Dr. Miau
@@ -2123,11 +2016,11 @@ Além disso, explore livremente e com calma (coração da conversa):
 - O que o tutor mais ama nesse pet.
 - Rotina diária deles juntos.
 
-## REGRA ESTRITA DE FOTOS
-- Se ainda não enviou foto: convide com carinho, reforçando o motivo ("Se você tiver uma fotinho dele, me manda! Isso vai deixar a surpresa ainda mais fiel a ele!").
-- Se já enviou foto: NUNCA mais peça. Comente com empolgação os detalhes visuais condizentes com a espécie e continue de onde parou.
-- Se não tiver foto: aceite com amor ("Sem problemas, miau! Suas palavras já me dão uma imagem linda dele!").
-- A foto serve APENAS para identificar o pet — o fundo NUNCA é o cenário do vídeo.
+## REGRA ESTRITA DE FOTOS E VÍDEO (MODELO SEEDANCE 2.0 MINI REFERENCE-TO-VIDEO)
+- O modelo de vídeo da Atlas Cloud (Seedance 2.0 Mini) exige uma foto de referência do pet para criar a animação 1080p de 15 segundos!
+- Se o usuário solicitar o vídeo e ainda não tiver enviado a foto do pet no chat: solicite a foto carinhosamente ("Miau! *ronrom* Adoraria criar um vídeo mágico de 15s em 1080p do seu pet! 📸 Anexa uma fotinho bem linda dele aqui no clipe para eu usar como referência no modelo Seedance da Atlas Cloud!").
+- Se já enviou foto no chat: celebre a foto recebida com muito afeto ("Miau! Que foto mais perfeita! Já estou usando a referência do [Nome do Pet] para animar a cena! 🐾✨") e acione trigger_video_generation: true.
+- A foto servirá de referência de características físicas e expressão para o vídeo animado.
 
 # CHECKLIST OBRIGATÓRIA DA FASE 2 — CENÁRIO DO VÍDEO
 Só entre aqui quando a Fase 1 estiver completa. Descubra, um de cada vez:
@@ -2160,6 +2053,25 @@ Defina "trigger_video_generation": true e "progress": 100 quando as checklists d
 - "protetor": histórias de superação, momentos heróicos ou ações mágicas.
 - "confuso": mensagem truncada ou incompreensível.
 
+# ENGENHARIA DE PROMPTS DE VÍDEO (CinePrompt AI)
+Quando "trigger_video_generation" for true, atue estritamente como o CinePrompt AI, Engenheiro de Prompts e Diretor de Fotografia especialista em Inteligência Artificial para vídeos (compatível com o modelo Atlas Cloud Seedance 2.0 Mini). Seu objetivo é transformar as ideias de cenas dos usuários em prompts técnicos, cinematográficos e perfeitamente estruturados.
+
+Você deve gerar o "video_prompt" contendo obrigatoriamente os seguintes 7 pilares técnicos em INGLÊS TÉCNICO:
+1. Sujeito e Ação (Subject & Action): Descrição precisa de quem/o que está na tela, raça, características físicas e qual é a mudança ou ação dinâmica ao longo do tempo em 15 segundos (evitando cenas estáticas).
+2. Cenário e Contexto (Setting & Context): Onde e quando a cena ocorre, detalhando a atmosfera, profundidade de campo e o tipo de iluminação.
+3. Enquadramento e Movimento de Câmera (Camera Shot & Motion): Tamanho de plano (close-up, plano médio, wide shot) e um movimento de câmera claro e deliberado de estúdio (dolly push, tracking shot, panning, órbita ou estático).
+4. Tokens de Continuidade (Continuity Tokens): Descrições físicas, traços marcantes, textura de pelagem/pele/escamas, roupas ou cores travadas para evitar deformações ou morphing do personagem/produto.
+5. Estilo Visual e Iluminação (Style & Lighting): Estilo estético (3D Pixar/Disney cinematográfico, fotorrealista), direção da luz (iluminação volumétrica, luz de recorte rim lighting, Octane render 8k).
+6. Prompts Negativos (Negative Prompt / Evitar): Lista do que o modelo deve excluir (membros extras, texto deformado, iluminação estourada, alteração de feições, movimentos caóticos).
+7. Formato e Especificação Técnica: Proporção de tela (16:9 widescreen para Atlas Cloud Seedance 2.0 Mini), 1080p de resolução, estimativa de ritmo e duração de 15 segundos.
+
+Regras do Agente CinePrompt AI:
+- Sempre forneça a versão final do prompt em Inglês técnico fluente (devido à melhor interpretação dos modelos de vídeo).
+- Evite adjetivos genéricos como "bonito", "legal" ou "impressionante"; utilize estritamente terminologia técnica de fotografia e cinema.
+
+Exemplo de estrutura completa para "video_prompt":
+"[Subject & Action]: High-end 3D animation featuring an adorable Golden Retriever dog named Bob, running joyfully forward with bouncy rhythm and expressive happy eyes over 5 seconds. [Setting & Context]: Set on a tropical sun-kissed golden sand beach during golden hour with sparkling turquoise waves and soft atmospheric bokeh. [Camera Shot & Motion]: Low-angle medium eye-level tracking dolly shot smoothly following the character. [Continuity Tokens]: Locked shiny golden-caramel fur texture, dark expressive eyes, maintaining anatomical consistency without feature morphing. [Style & Lighting]: 3D Pixar-Disney cinematic style, soft volumetric rim lighting, Octane render 8k detail, 16:9 widescreen aspect ratio. [Negative Prompt]: Avoid extra limbs, distorted face, character morphing, text, watermarks, chaotic motion, frame flickering."
+
 # FORMATO DE SAÍDA (ESTRITAMENTE JSON)
 Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
 {
@@ -2168,10 +2080,8 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
   "phase": 1 | 2 | 3,
   "progress": número de 0 a 100,
   "trigger_video_generation": true | false,
-  "video_prompt": "string 100% in fluent cinematic English describing Pet + Scenario + Action in Pixar 3D style (e.g., 'A breathtaking 3D Pixar-style animation of an adorable ruby-red goldfish named Jose swimming joyfully inside a modern sunlit living room aquarium, cinematic 8k, soft volumetric lighting.'). NEVER leave Portuguese words inside this prompt! (only filled when trigger_video_generation is true; otherwise empty string)"
+  "video_prompt": "string 100% em inglês técnico estruturada no formato CinePrompt AI acima (preenchida apenas quando trigger_video_generation for true; caso contrário string vazia '')"
 }`;
-
-      const evalState = evaluateConversationState(cleanedHistory, message);
 
       const hasPhotoInHistory = (cleanedHistory || []).some(h => 
         (h.text || "").toLowerCase().includes("agente de visão") || 
@@ -2195,18 +2105,28 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
         photoDirective = "\n\n⚠️ REGRA CRÍTICA DE FOTO: Já foi solicitada ou mencionada foto anteriormente nesta conversa (ou a conversa já passou da Fase 1). A foto só pode ser pedida uma única vez por chat e apenas na Fase 1 para dar contexto ao pet. É TERMINANTEMENTE PROIBIDO pedir, sugerir ou convidar envio de fotos, imagens ou fotinhas! Continue a conversa apenas em texto.";
       }
 
+      // Histórico prévio de perguntas para garantir ANTI-REPETIÇÃO E CONTINUIDADE
+      const assistantHistoryMsgs = cleanedHistory
+        .filter(h => h.role === "model" || h.role === "assistant" || h.sender === "Agente")
+        .map(h => h.text)
+        .slice(-6);
+
+      const antiRepetitionDirective = assistantHistoryMsgs.length > 0
+        ? `\n\n⚠️ REGRA CRÍTICA DE CONTINUIDADE E MEMÓRIA (MENSAGENS JÁ ENVIADAS PELO ASSISTENTE - NÃO REPETIR!):\n${assistantHistoryMsgs.map((m, idx) => `[Mensagem anterior ${idx+1}]: "${m}"`).join("\n")}\n\nÉ STRICTAMENTE PROIBIDO REPETIR O MESMO TEXTO, A MESMA PERGUNTA OU RETORNAR A PERGUNTAS JÁ RESPONDIDAS! Se você já perguntou o nome do pet, o tipo do animal, o cenário ou a ação nas mensagens acima, AVANCE IMEDIATAMENTE para a fase seguinte sem perguntar novamente!`
+        : "";
+
       let stageDirective = "";
       if (evalState.maxAllowedPhase === 1) {
         stageDirective = `\n\nDIRETRIZ DA ETAPA ATUAL (FASE 1 – CONHECENDO O PET E SUA HISTÓRIA COM O TUTOR): O Dr. Miau é apaixonado por histórias de animais! Explore com muito carinho e entusiasmo a história de como o tutor conheceu o pet, resgate/adoção, chegada em casa, travessuras inesquecíveis e momentos marcantes de cumplicidade, além das características físicas. Mantenha phase=1 e progress de 10 a 35.\nStatus atual:\n${evalState.petProfile.checklistText}`;
       } else if (evalState.maxAllowedPhase === 2) {
-        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 2 – CENÁRIO DO VÍDEO): A Fase 1 está completa! Descubra em qual cenário o tutor quer ver o pet (praia, floresta, espaço, castelo, jardim, etc.). Aceite qualquer lugar sugerido. Mantenha phase=2 e progress entre 36 e 70.";
+        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 2 – CENÁRIO DO VÍDEO): A Fase 1 está completa! Descubra em qual cenário o tutor quer ver o pet (praia, floresta, espaço, castelo, jardim, campo verde de mato alto, etc.). Aceite qualquer lugar sugerido. Mantenha phase=2 e progress entre 36 e 70.";
       } else if (evalState.maxAllowedPhase === 3 && !evalState.canTriggerVideo) {
-        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 3 – AÇÃO DO PET): O cenário já está definido! Pergunte qual ação o pet fará no vídeo (aceite QUALQUER coisa que o tutor disser: skate, brincar, correr, dormir, comer, dançar, etc.). Se o tutor já informou a ação nesta mensagem, comemore, defina trigger_video_generation=true, progress=100 e crie o video_prompt em inglês!";
+        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 3 – AÇÃO DO PET): O cenário já está definido! Pergunte qual ação o pet fará no vídeo (aceite QUALQUER coisa que o tutor disser: dormindo, vento batendo, matos se mexendo, skate, brincar, correr, voar, etc.). Se o tutor já informou a ação nesta mensagem, comemore, defina trigger_video_generation=true, progress=100 e crie o video_prompt em inglês!";
       } else if (evalState.canTriggerVideo) {
         stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (TRIGGER DE GERAÇÃO DE VÍDEO): Pet, Cenário e Ação estão todos definidos! Comemore muito, crie uma frase de encerramento estilo trailer divertido, defina trigger_video_generation=true, progress=100 e preencha video_prompt em inglês descrevendo Pet + Cenário + Ação.";
       }
 
-      const finalSystemInstruction = systemInstruction + photoDirective + stageDirective;
+      const finalSystemInstruction = systemInstruction + photoDirective + antiRepetitionDirective + stageDirective;
       const promptContents = buildAlternatingContents(cleanedHistory, message);
 
       console.log(`[Gemini Request] Mensagem recebida para entrevista: "${message}" (Etapa calculada: Fase ${evalState.maxAllowedPhase})`);
@@ -2357,17 +2277,15 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
 
     const targetKey = videoMapping[parsed.sentiment] || "normal";
 
-    let apiJobResult = null;
     const geminiKey = getCurrentKey();
-    const magicHourKey = (getMagicHourKey() || "").trim();
-    let mhError = null;
+    let atlasJobId = null;
+    let atlasStatus = null;
+    let atlasError = null;
 
-    // Se a geração do vídeo foi engatilhada, fazemos a chamada direta para a API do Magic Hour
     if (parsed.trigger_video_generation && parsed.video_prompt) {
-      // Sanitiza o prompt caso ainda contenha resquícios de português ou palavras misturadas
       const hasPtResidues = /\b(peixe|cachorro|gato|vira lata|vira-lata|vermelho|vermelha|azul|amarelo|numa|com|casa na cidade|sala|praia|fazendo)\b/i.test(parsed.video_prompt);
       if (hasPtResidues) {
-        console.log("[Prompt Sanitizer] Resquícios de português detectados no prompt de vídeo. Convertendo para inglês cinematográfico 3D Pixar...");
+        console.log("[Prompt Sanitizer] Convertendo termos do prompt para inglês cinematográfico 3D Pixar...");
         parsed.video_prompt = translateToEnglishCinematicTerms(
           evalState.petProfile?.petType,
           evalState.petProfile?.petBreed,
@@ -2378,31 +2296,43 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
         );
       }
 
-      lastMagicHourPromptInfo = {
+      lastVideoPromptInfo = {
         prompt: parsed.video_prompt,
         timestamp: new Date().toISOString(),
-        jobId: null,
-        status: "sending"
+        jobId: `prompt_${Date.now()}`,
+        status: "completed"
       };
 
+      // Dispara a geração real de vídeo 3D pela Atlas Cloud
       try {
-        apiJobResult = await triggerMagicHourGeneration(parsed.video_prompt);
-      } catch (mhErr) {
-        console.error("[Magic Hour Error in Chat Endpoint]:", mhErr);
-        mhError = mhErr.message;
-        lastMagicHourPromptInfo.status = "failed_send: " + mhErr.message;
-        parsed.trigger_video_generation = false;
-        if (mhErr.message.includes("MAGIC_HOUR_QUOTA_402") || mhErr.message.includes("insufficient_credits")) {
-          parsed.response += `\n\n🎬 *(Dr. Miau: O roteiro da nossa animação 3D ficou prontinho e maravilhoso! O estúdio atingiu o limite temporário de créditos do Magic Hour, mas a cena do seu pet já está salva!)*`;
+        console.log(`[Atlas Cloud] Fim de conversa alcançado! Disparando geração de vídeo com prompt: "${parsed.video_prompt}"`);
+        const photoCandidate = (cleanedHistory || []).find(h => h.image && typeof h.image === "string");
+        const petImageUrl = photoCandidate ? photoCandidate.image : null;
+
+        const atlasResult = await atlasCloudService.generateReferenceVideo({
+          imageUrl: petImageUrl,
+          prompt: parsed.video_prompt,
+          ratio: "16:9",
+          duration: 15,
+          resolution: "720p"
+        });
+
+        if (atlasResult && atlasResult.taskId) {
+          atlasJobId = atlasResult.taskId;
+          atlasStatus = atlasResult.status || "processing";
+          console.log(`✅ [Atlas Cloud] Vídeo disparado com sucesso! TaskId: ${atlasJobId}`);
         }
+      } catch (atlasErr) {
+        console.error("❌ [Atlas Cloud] Erro ao disparar geração do vídeo:", atlasErr.message);
+        atlasError = atlasErr.message;
       }
     }
 
     const apiStatus = {
       gemini_connected: !parsed.api_fallback_used && !!geminiKey,
-      gemini_error: parsed.api_error_detail || (!geminiKey ? "GEMINI_API_KEY_MISSING: Chave GEMINI_API_KEY não configurada no servidor (adicione em Railway > Variables)." : null),
-      magic_hour_configured: !!magicHourKey && !magicHourKey.includes("sua_chave_aqui"),
-      magic_hour_error: mhError
+      gemini_error: parsed.api_error_detail || (!geminiKey ? "GEMINI_API_KEY_MISSING: Chave GEMINI_API_KEY não configurada no servidor." : null),
+      atlascloud_configured: true,
+      atlascloud_error: atlasError || null
     };
 
     return {
@@ -2412,8 +2342,8 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
       progress: parsed.progress !== undefined ? parsed.progress : 0,
       trigger_video_generation: parsed.trigger_video_generation || false,
       video_prompt: parsed.video_prompt || "",
-      jobId: apiJobResult ? apiJobResult.id : null,
-      video_status: apiJobResult ? apiJobResult.status : null,
+      jobId: atlasJobId || null,
+      video_status: atlasStatus || null,
       nativeUrl: `/videos/${targetKey}.mp4`,
       fallbackUrl: videoUrls[targetKey],
       api_status: apiStatus
@@ -2439,6 +2369,35 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
       onChunk(fallbackObj.response);
     }
 
+    let fallbackJobId = null;
+    let fallbackAtlasStatus = null;
+    let fallbackAtlasError = null;
+
+    if (fallbackObj.trigger_video_generation) {
+      try {
+        console.log(`[Atlas Cloud] Fim de conversa alcançado via SmartFallback! Disparando Atlas Cloud com prompt: "${fallbackObj.video_prompt}"`);
+        const photoCandidate = (Array.isArray(history) ? history : []).find(h => h && h.image && typeof h.image === "string");
+        const petImageUrl = photoCandidate ? photoCandidate.image : null;
+
+        const atlasResult = await atlasCloudService.generateReferenceVideo({
+          imageUrl: petImageUrl,
+          prompt: fallbackObj.video_prompt,
+          ratio: "16:9",
+          duration: 15,
+          resolution: "720p"
+        });
+
+        if (atlasResult && atlasResult.taskId) {
+          fallbackJobId = atlasResult.taskId;
+          fallbackAtlasStatus = atlasResult.status || "processing";
+          console.log(`✅ [Atlas Cloud] Vídeo disparado com sucesso no SmartFallback! TaskId: ${fallbackJobId}`);
+        }
+      } catch (atlasErr) {
+        console.error("❌ [Atlas Cloud] Erro no SmartFallback ao disparar vídeo:", atlasErr.message);
+        fallbackAtlasError = atlasErr.message;
+      }
+    }
+
     return {
       response: fallbackObj.response,
       sentiment: fallbackObj.sentiment,
@@ -2446,15 +2405,15 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
       progress: fallbackObj.progress || 0,
       trigger_video_generation: fallbackObj.trigger_video_generation || false,
       video_prompt: fallbackObj.video_prompt || "",
-      jobId: null,
-      video_status: null,
+      jobId: fallbackJobId,
+      video_status: fallbackAtlasStatus,
       nativeUrl: "/videos/normal.mp4",
       fallbackUrl: videoUrls.normal,
       api_status: {
         gemini_connected: false,
         gemini_error: `CRITICAL_CHAT_ERROR: ${err.message}`,
-        magic_hour_configured: !!getMagicHourKey(),
-        magic_hour_error: null
+        atlascloud_configured: true,
+        atlascloud_error: fallbackAtlasError
       }
     };
   }
@@ -2462,18 +2421,18 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
 
 // REST API para Chat tradicional
 app.post("/api/chat", async (req, res) => {
-  const { message, history } = req.body;
+  const { message, history, sessionState } = req.body;
   if (!message) {
     return res.status(400).json({ error: "Sua mensagem é necessária." });
   }
 
-  const result = await processChatRequest({ message, history, onChunk: null });
+  const result = await processChatRequest({ message, history, sessionState, onChunk: null });
   res.json(result);
 });
 
 // REST API para Chat com Streaming SSE em tempo real (palavra por palavra instantâneo)
 app.post("/api/chat/stream", async (req, res) => {
-  const { message, history } = req.body;
+  const { message, history, sessionState } = req.body;
   if (!message) {
     return res.status(400).json({ error: "Sua mensagem é necessária." });
   }
@@ -2492,6 +2451,7 @@ app.post("/api/chat/stream", async (req, res) => {
     const result = await processChatRequest({
       message,
       history,
+      sessionState,
       onChunk: (chunk) => {
         sendEvent("chunk", { chunk });
       }
@@ -2505,8 +2465,8 @@ app.post("/api/chat/stream", async (req, res) => {
       data: {
         response: "Miau! Adorei bater esse papo com você. Me conta mais sobre o seu pet!",
         sentiment: "alegre",
-        phase: 1,
-        progress: 25
+        phase: sessionState?.currentPhase || 1,
+        progress: sessionState?.progress || 25
       }
     });
     res.end();

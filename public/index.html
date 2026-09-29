@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Remix agentpet mumu</title>
-  <meta name="description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets Magic Hour." />
-  <meta property="og:title" content="Remix agentpet mumu" />
-  <meta property="og:description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets Magic Hour." />
+  <meta name="description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets ElevenLabs (Seedance 2.5)." />
+  <meta property="og:title" content="Pet Agent Dr. Miau - Animações 3D com ElevenLabs Seedance 2.5" />
+  <meta property="og:description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets ElevenLabs (Seedance 2.5)." />
   <script>
     // Polyfill defensivo: permite que scripts de telemetria ou extensões atribuam window.fetch com segurança
     try {
@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <a href="#main-chat" class="skip-link">Pular para o chat</a>
@@ -58,7 +58,7 @@
     </div>
   </nav>
 
-  <!-- Botão de Trocar Chat (Em cima na direita, embaixo da bolinha do perfil) -->
+  <!-- Botão de Alternar Layout Superior (Trocar Chat / Chat Padrão) -->
   <button
     class="top-layout-switch-btn"
     id="toggleLayoutBtn"
@@ -70,7 +70,7 @@
       <rect width="18" height="18" x="3" y="3" rx="2"></rect>
       <line x1="12" y1="3" x2="12" y2="21"></line>
     </svg>
-    <span id="toggleLayoutText">Trocar Chat</span>
+    <span id="toggleLayoutText">Chat Padrão</span>
   </button>
 
   <!-- ── App ── -->
@@ -168,6 +168,15 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
                 <polyline points="4 17 10 11 4 5"></polyline>
                 <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+            </button>
+
+            <button class="tool-btn tool-btn--gallery" id="chatGalleryBtn" data-action="openGallery" aria-label="Abrir Galeria de Vídeos" title="Galeria de Vídeos de Animação" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" style="pointer-events: none;" aria-hidden="true">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                <line x1="7" y1="2" x2="7" y2="22"></line>
+                <line x1="17" y1="2" x2="17" y2="22"></line>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
               </svg>
             </button>
 
@@ -288,11 +297,34 @@
     </div>
   </div>
 
+  <!-- Banner Flutuante de Progresso de Geração de Vídeo (Atlas Cloud Seedance 2.0 Mini) -->
+  <div id="videoProgressBanner" class="video-progress-banner hidden" role="status" aria-live="polite">
+    <div class="video-progress-banner__content">
+      <div class="video-progress-banner__icon">
+        <span class="video-progress-banner__spinner"></span>
+        <span class="video-progress-banner__badge">16:9 • 720p • 15s</span>
+      </div>
+      <div class="video-progress-banner__info">
+        <div class="video-progress-banner__title">
+          <span>🎬 Estúdio Atlas Cloud (Seedance 2.0 Mini)</span>
+          <span class="video-progress-banner__percent" id="videoProgressPercent">0%</span>
+        </div>
+        <div class="video-progress-banner__meta-row">
+          <p class="video-progress-banner__desc" id="videoProgressDesc">Iniciando síntese de animação 3D do seu pet...</p>
+          <span class="video-progress-banner__time" id="videoProgressTime">⏱️ 0s</span>
+        </div>
+        <div class="video-progress-banner__bar-bg">
+          <div class="video-progress-banner__bar-fill" id="videoProgressBarFill" style="width: 5%;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal de Apresentação de Vídeo -->
   <div class="video-modal-backdrop hidden" id="videoModalBackdrop">
     <div class="video-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="video-modal__header">
-        <h2 id="modalTitle">🎬 Seu Vídeo do Pet está Pronto!</h2>
+        <h2 id="modalTitle">🎬 Animação 3D (Atlas Cloud Seedance 2.0 Mini)</h2>
         <button class="video-modal__close" id="closeVideoModal" aria-label="Fechar modal">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -584,8 +616,10 @@
         </div>
       </div>
     </div>
-    <!-- Modal de Diagnóstico e Status das APIs -->
-    <div class="api-modal-backdrop hidden" id="apiModalBackdrop">
+  </div> <!-- Fecha #profileDropdown -->
+
+  <!-- Modal de Diagnóstico e Status das APIs -->
+  <div class="api-modal-backdrop hidden" id="apiModalBackdrop">
       <div class="api-modal">
         <div class="api-modal__header">
           <h3>⚡ Diagnóstico de Conexão das APIs</h3>
@@ -607,28 +641,32 @@
             <p class="api-card__msg" id="geminiCardMsg">Testando conexão com o servidor...</p>
           </div>
 
-          <div class="api-card" id="magicHourApiCard">
+          <div class="api-card" id="atlasCloudApiCard">
             <div class="api-card__header">
               <div class="api-card__title">
-                <span class="api-card__dot" id="magicHourCardDot"></span>
-                <strong>Magic Hour API</strong> (Estúdio de Vídeo 3D)
+                <span class="api-card__dot" id="atlasCloudCardDot"></span>
+                <strong>Atlas Cloud API</strong> (bytedance/seedance-2.0-mini/reference-to-video)
               </div>
-              <span class="api-card__badge" id="magicHourCardBadge">Verificando...</span>
+              <span class="api-card__badge" id="atlasCloudCardBadge">Verificando...</span>
             </div>
-            <p class="api-card__msg" id="magicHourCardMsg">Testando conexão com o servidor...</p>
+            <p class="api-card__msg" id="atlasCloudCardMsg">Testando conexão com o servidor...</p>
+            <div class="api-card__key-input" style="margin-top: 10px; display: flex; gap: 8px;">
+              <input type="password" id="atlasApiKeyInput" placeholder="Inserir ou atualizar ATLASCLOUD_API_KEY" style="flex: 1; padding: 7px 10px; border-radius: 6px; border: 1px solid rgba(120, 120, 120, 0.3); font-size: 13px; background: rgba(0,0,0,0.03);" />
+              <button id="saveAtlasKeyBtn" style="padding: 7px 14px; border-radius: 6px; border: none; background: #6366f1; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px;">Salvar Chave</button>
+            </div>
+            <div id="saveAtlasKeyMsg" style="font-size: 12px; margin-top: 4px; display: none;"></div>
           </div>
 
           <div class="api-modal__help">
-            <h4>💡 Como Configurar as Chaves no Railway:</h4>
+            <h4>💡 Como Configurar as Chaves no Railway ou .env:</h4>
             <ol>
-              <li>Acesse o painel do seu projeto no <strong>Railway</strong> (railway.com).</li>
-              <li>Clique no seu <strong>Serviço</strong> (sua aplicação).</li>
+              <li>Acesse o painel do seu projeto no <strong>Railway</strong> (railway.com) ou seu arquivo <code>.env</code> local.</li>
               <li>Acesse a aba <strong>Variables</strong> (Variáveis de Ambiente).</li>
-              <li>Clique em <strong>+ New Variable</strong> e adicione:
+              <li>Adicione as variáveis:
                 <br />• Nome: <code>GEMINI_API_KEY</code> &nbsp;|&nbsp; Valor: <em>Sua chave da Google Gemini API (ex: AIzaSy...)</em>
-                <br />• Nome: <code>MAGIC_HOUR_API_KEY</code> &nbsp;|&nbsp; Valor: <em>Sua chave do Magic Hour (opcional)</em>
+                <br />• Nome: <code>ATLASCLOUD_API_KEY</code> &nbsp;|&nbsp; Valor: <em>Sua chave da Atlas Cloud (console.atlascloud.ai)</em>
               </li>
-              <li>A Railway fará o <strong>Deploy automático</strong> em poucos segundos com a IA 100% ativa! 🚀</li>
+              <li>Ou cole a chave diretamente no campo acima e clique em "Salvar Chave"! 🎬</li>
             </ol>
           </div>
         </div>
@@ -637,8 +675,42 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <script type="module" src="main.js"></script>
+    <!-- Modal da Galeria de Animações em Vídeo dos Pets -->
+    <div class="gallery-modal-backdrop hidden" id="galleryModalBackdrop">
+      <div class="gallery-modal" role="dialog" aria-modal="true" aria-labelledby="galleryModalTitle">
+        <div class="gallery-modal__header">
+          <div class="gallery-modal__header-title">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+              <line x1="7" y1="2" x2="7" y2="22"></line>
+              <line x1="17" y1="2" x2="17" y2="22"></line>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+            </svg>
+            <h2 id="galleryModalTitle">🎬 Galeria de Animações do Pet</h2>
+          </div>
+          <button class="gallery-modal__close" id="closeGalleryModalBtn" aria-label="Fechar galeria">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="gallery-modal__body">
+          <div id="galleryModalGrid" class="gallery-grid">
+            <!-- Os cards de vídeos gerados serão renderizados aqui pelo main.js -->
+          </div>
+        </div>
+
+        <div class="gallery-modal__footer">
+          <button id="closeGalleryModalFooterBtn" class="modal-btn modal-btn--confirm">
+            Fechar Galeria
+          </button>
+        </div>
+      </div>
+    </div>
+
+  <script type="module" src="/main.js"></script>
 </body>
 </html>

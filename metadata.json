@@ -1,6 +1,6 @@
 {
   "name": "Remix agentpet mumu",
-  "description": "Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets Magic Hour.",
+  "description": "Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets Atlas Cloud.",
   "requestFramePermissions": [
     "microphone"
   ],
