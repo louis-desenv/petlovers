@@ -3276,6 +3276,99 @@ body[data-theme-color="purple"] {
   transform: translateY(0) scale(0.98);
 }
 
+/* ── Interactive Chat Photo Prompt Card (During Conversation) ── */
+.chat-photo-prompt-card {
+  margin: 10px 0 14px 0;
+  padding: 14px 16px;
+  background: rgba(18, 30, 26, 0.92);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: fadeInQuickConfirm 300ms ease-out forwards;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 95%;
+  align-self: flex-start;
+}
+
+.photo-prompt-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.photo-prompt-card__icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.photo-prompt-card__texts strong {
+  display: block;
+  font-size: 14px;
+  color: #f1f5f9;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.photo-prompt-card__texts p {
+  margin: 0;
+  font-size: 12.5px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.photo-prompt-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.photo-prompt-btn {
+  font-family: var(--font, system-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 180ms ease;
+  user-select: none;
+}
+
+.photo-prompt-btn--upload {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+}
+
+.photo-prompt-btn--upload:hover {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.45);
+}
+
+.photo-prompt-btn--skip {
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.photo-prompt-btn--skip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+
 
 
 

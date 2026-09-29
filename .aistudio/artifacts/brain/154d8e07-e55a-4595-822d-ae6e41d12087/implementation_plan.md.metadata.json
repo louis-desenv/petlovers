@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de implementação para substituir o diálogo engessado do Dr. Miau pelo novo Chatbot Gemini fluido e inteligente, com captura direta da imagem para a API Atlas Cloud sem redundâncias.",
-  "updatedAt":  "2026-09-29T13:17:19.291461164Z",
+  "summary":  "Plano de implementação para fluxo de solicitação de foto do pet (com convite inicial em chat, popup interativo com opção de envio ou recusa) e eliminação completa de imagens pré-fabricadas na Atlas Cloud, utilizando 100% a descrição real e a foto do tutor.",
+  "updatedAt":  "2026-09-29T14:04:48.866203259Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -1,81 +1,34 @@
-# Substituição do Chatbot pelo Gemini Fluido & Envio Direto de Imagem para a Atlas Cloud
+# Plano de Implementação — Solicitação de Foto Interativa e Geração Fiel na Atlas Cloud
 
-Plano de modernização da interface de conversa para remover roteiros engessados e mensagens repetitivas, implementando um Chatbot Gemini 100% conversacional, empático e inteligente, que encaminha a foto do pet diretamente como referência para a Atlas Cloud sem loops ou repetições.
-
-## Decisões Confirmadas na Etapa de Alinhamento
-
-> [!IMPORTANT]
-> - **Estilo de Diálogo**: Assistente Inteligente e Fluido (sem fases forçadas, sem perguntas em loop ou roteiros engessados).
-> - **Comportamento com Fotos**: Ao receber a imagem do pet, o Gemini não entra em loop pedindo foto novamente. A foto é registrada imediatamente como referência visual (`image_url`) para a renderização do vídeo 3D na **Atlas Cloud** (`bytedance/seedance-2.0-mini`) e o chatbot confirma o recebimento de forma natural e acolhedora.
-
----
-
-## 1. Visão Geral & Nova Experiência
-
-- **Diálogo Orgânico e Contextual**: O chatbot manterá o histórico contínuo (multi-turn) usando `gemini-3.8-flash` (e `gemini-3.1-flash-lite` para respostas ultra-rápidas), respondendo como um verdadeiro diretor criativo e parceiro de animação 3D.
-- **Detecção de Foto e Envio Imediato**: Quando o usuário anexa uma imagem, o backend armazena o upload diretamente no estado da sessão do vídeo e prepara a referência fotográfica para a geração do vídeo cinematográfico.
-- **Fim das Repetições**: O prompt de sistema será completamente limpo de restrições artificiais de "fases 1, 2, 3" e instruções que causavam o Dr. Miau a pedir repetidamente fotos ou repetir frases prévias.
+## 🎯 Objetivo
+1. **Eliminar 100% qualquer envio de imagens pré-fabricadas** (como `dr-miau.png`) para a Atlas Cloud. Apenas a foto real enviada pelo tutor é utilizada.
+2. **Geração baseada na descrição fiel do pet**: Se o tutor não enviar foto, a Atlas Cloud recebe um prompt cinematográfico Text-to-Video completo com a espécie, cor (ex: gato preto), cenário (ex: em cima da árvore) e ações descritas pelo tutor.
+3. **Fluxo de foto amigável e interativo no chat**:
+   - Início da conversa pelo chat conhecendo o pet e sua história.
+   - Após as primeiras trocas, exibição de um card/popup interativo dentro do chat com botões para **"Enviar Foto"** (com prévia inline) ou **"Continuar apenas com a descrição"** (recusar).
 
 ---
 
-## 2. Experiência do Usuário & Design Visual
+## 📋 Etapas de Execução
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        BARRA SUPERIOR (HEADER)                         │
-│  [Ícone Pet Agent]        Dr. Miau • Studio 3D AI         [Ajuda (?)]  │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                     HISTÓRICO DA CONVERSA                        │  │
-│  │  👤 Usuário: [Foto do pet enviada] "Quero ele voando no espaço"   │  │
-│  │                                                                  │  │
-│  │  🐾 Gemini: "Foto recebida e adicionada como referência visual!  │  │
-│  │     Já preparei a cena espacial para a renderização 3D!"         │  │
-│  │     [⚡ Card de Confirmação e Geração de Vídeo Atlas Cloud]       │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                                                                        │
-├────────────────────────────────────────────────────────────────────────┤
-│  [📎 Anexar Foto] [ Digite sua ideia ou converse... ] [🎙️ Voz] [🚀 Enviar] │
-└────────────────────────────────────────────────────────────────────────┘
-```
+### 1. `src/services/atlasCloudService.js` & `server.js` (Backend)
+- Remover a função `getDefaultPetReferenceImage()` e qualquer fallback para `dr-miau.png`.
+- Ajustar a montagem do payload para a Atlas Cloud:
+  - **Com foto do tutor**: envia `referenceImages: [imageUrl]` e condicionamento `@image1`.
+  - **Sem foto do tutor**: envia `referenceImages: []`, sem tags `@image1`, permitindo que o modelo gere a cena 3D puramente a partir do prompt descritivo detalhado do animal.
+- Atualizar as instruções do Gemini (`systemInstruction`) para sintetizar prompts 3D que incorporem estritamente os traços descritos pelo tutor (espécie, cores, pelagem, cenário, humor).
 
-- **Notificação Visual Imediata de Imagem**: Assim que a foto é anexada ou enviada, o chat exibe uma miniatura com badge de confirmação verde *"Foto anexada como referência visual para a Atlas Cloud"*.
-- **Transição Fluida**: O botão de geração de vídeo 3D da Atlas Cloud fica acessível a qualquer momento que o usuário definir sua ideia ou enviar a foto.
+### 2. `public/index.html` & `public/main.js` (Frontend & Chat Interativo)
+- **Card/Popup interativo de Foto no Chat**:
+  - Criar um componente visual dentro do fluxo de mensagens do chat quando o Dr. Miau convida o tutor para compartilhar a foto.
+  - Opção 1: Botão destacado para selecionar/tirar foto (com preview e confirmação).
+  - Opção 2: Botão claro "Continuar sem foto (usar apenas a descrição)".
+- **Controle de Estado**:
+  - Se o tutor enviar a imagem, marca como foto confirmada e exibe miniatura na mensagem.
+  - Se o tutor recusar, avisa o Dr. Miau para focar na descrição textual e avançar suavemente no roteiro da cena 3D.
+- Atualizar a barra de ferramentas de anexo e input para manter sincronização completa.
 
----
-
-## 3. Arquitetura Técnica & Fluxo de Dados
-
-```
- ┌─────────────────┐        ┌──────────────────┐        ┌───────────────────────┐
- │   Navegador /   │ ──1──> │  Servidor Node   │ ──2──> │  Gemini API MultiTurn │
- │  Chat Interface │        │   (server.js)    │        │   (gemini-3.8-flash)  │
- └─────────────────┘        └──────────────────┘        └───────────────────────┘
-          │                           │
-          │ (Envio de Imagem Base64)  │ (Guarda referência visual)
-          ▼                           ▼
- ┌──────────────────────────────────────────────────────────────────────────────┐
- │                    Atlas Cloud API (Seedance 2.0 Mini)                       │
- │  Prompt Cinematográfico + @image1 (Foto do pet do usuário como referência)   │
- └──────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Principais Alterações no Código:
-1. **Remodelagem do Prompt de Sistema (`systemInstruction`)**:
-   - Eliminação de regras que forçavam a repetição de perguntas ("qual é o nome do pet? envie a foto").
-   - Nova instrução: Se uma foto já estiver presente ou for enviada, reconheça imediatamente e integre-a à criação do vídeo 3D sem solicitar novamente.
-2. **Atualização do Tratamento de Mídia no Frontend (`index.html` e `client.js`)**:
-   - Garantir que a imagem enviada pelo usuário seja anexada ao payload `/api/chat` de forma persistente e o estado `hasPetPhoto` seja ativado no cliente.
-3. **Geração na Atlas Cloud**:
-   - Ao disparar a geração de vídeo, a foto enviada pelo usuário é enviada no parâmetro de imagem da API Atlas Cloud com prompt enriquecido.
-
----
-
-## 4. Plano de Execução & Testes
-
-1. **Ajuste do Servidor**: Reescrever as instruções do sistema no `server.js` para diálogo livre, empático e inteligente.
-2. **Ajuste da Gestão de Estado**: Fazer com que o upload de foto marque o pet como identificado e pronto para renderizar.
-3. **Validação & Testes**:
-   - Testar conversa multi-turn sem loops.
-   - Enviar foto do pet e verificar se a IA responde naturalmente e conecta com a geração Atlas Cloud sem pedir imagem novamente.
+### 3. Validação e Testes
+- Testar fluxo de conversa com envio de foto e verificar que apenas a foto do tutor é repassada ao endpoint.
+- Testar fluxo de conversa recusando o envio da foto (gato preto na árvore) e verificar que nenhuma imagem é enviada à Atlas Cloud, conferindo se o prompt de texto contém a descrição completa.
+- Executar `compile_applet` e reiniciar o servidor.

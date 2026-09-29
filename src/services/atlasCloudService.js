@@ -3,25 +3,6 @@ const path = require("path");
 
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-function getDefaultPetReferenceImage() {
-  try {
-    const candidatePaths = [
-      path.join(process.cwd(), "public", "dr-miau.png"),
-      path.join(process.cwd(), "src", "dr-miau.png"),
-      path.join(__dirname, "..", "..", "public", "dr-miau.png")
-    ];
-    for (const p of candidatePaths) {
-      if (fs.existsSync(p)) {
-        const buf = fs.readFileSync(p);
-        return `data:image/png;base64,${buf.toString("base64")}`;
-      }
-    }
-  } catch (e) {
-    console.warn("⚠️ Não foi possível carregar dr-miau.png local:", e.message);
-  }
-  return "";
-}
-
 let runtimeApiKey = "";
 
 /**
@@ -123,17 +104,15 @@ async function generateReferenceVideo({
   }
 
   // Prepara as imagens de referência:
-  // A API exige min items: 1. Se o usuário forneceu imagem de pet, usa-a; senão usa a foto 3D do Dr. Miau como referência felina.
+  // Usa UNICAMENTE a foto real enviada pelo tutor. Se o tutor não enviou foto, NUNCA usa imagens pré-fabricadas.
   let referenceImages = [];
-  if (imageUrl && typeof imageUrl === "string" && imageUrl.trim()) {
-    console.log(`[AtlasCloudService] Usando foto enviada pelo usuário como referência de personagem.`);
+  const hasUserPhoto = Boolean(imageUrl && typeof imageUrl === "string" && imageUrl.trim());
+
+  if (hasUserPhoto) {
+    console.log(`[AtlasCloudService] Usando foto enviada pelo usuário como referência única de personagem.`);
     referenceImages = [imageUrl.trim()];
   } else {
-    const defaultPet = getDefaultPetReferenceImage();
-    if (defaultPet) {
-      console.log(`[AtlasCloudService] Nenhuma foto enviada. Usando imagem 3D do Dr. Miau como referência do pet.`);
-      referenceImages = [defaultPet];
-    }
+    console.log(`[AtlasCloudService] Nenhuma foto enviada pelo tutor. Gerando animação 3D puramente via Text-to-Video a partir da descrição do pet.`);
   }
 
   const endpoint = "https://api.atlascloud.ai/api/v1/model/generateVideo";
@@ -143,18 +122,25 @@ async function generateReferenceVideo({
   const finalDuration = (typeof duration === "number" && duration > 0) ? duration : 15;
   const finalRatio = ratio || aspectRatio || "16:9";
 
-  // Conforme a documentação da Seedance 2.0 Mini, @image1 referencia a primeira imagem de referência
   let cleanPrompt = prompt || "An adorable 3D Pixar-style animated pet hero in a magical world, vibrant cinematic lighting, ultra detailed 8k, 16:9 aspect ratio.";
-  if (referenceImages.length > 0 && !cleanPrompt.includes("@image1") && !cleanPrompt.includes("@Image1")) {
-    cleanPrompt = `The character @image1 in this scene: ${cleanPrompt}`;
+  
+  if (hasUserPhoto) {
+    // Quando há foto do tutor, usa condicionamento @image1
+    if (!cleanPrompt.includes("@image1") && !cleanPrompt.includes("@Image1")) {
+      cleanPrompt = `The character @image1 in this scene: ${cleanPrompt}`;
+    }
+  } else {
+    // Quando NÃO há foto do tutor, limpa qualquer tag @image1 acidental do prompt para garantir modo Text-to-Video 100% puro
+    cleanPrompt = cleanPrompt.replace(/@image\d+/gi, "").replace(/the character\s+in this scene:/gi, "").trim();
   }
 
-  // Schema OpenAPI da Atlas Cloud exige minItems: 1 em reference_videos e reference_audios se incluídos.
-  // Portanto, se estiverem vazios, não os enviamos para evitar validações errôneas.
+  // Monta payload estritamente compatível: se houver foto usa reference-to-video com reference_images;
+  // se não houver foto usa text-to-video sem reference_images
   const payload = {
-    model: "bytedance/seedance-2.0-mini/reference-to-video",
+    model: hasUserPhoto 
+      ? "bytedance/seedance-2.0-mini/reference-to-video" 
+      : "bytedance/seedance-2.0-mini/text-to-video",
     prompt: cleanPrompt,
-    reference_images: referenceImages,
     duration: finalDuration,
     resolution: finalResolution,
     ratio: finalRatio,
@@ -165,12 +151,17 @@ async function generateReferenceVideo({
     return_last_frame: false
   };
 
+  if (hasUserPhoto && referenceImages.length > 0) {
+    payload.reference_images = referenceImages;
+  }
+
   console.log(`[AtlasCloudService] Enviando POST para ${endpoint} com payload:`, {
     model: payload.model,
-    prompt: payload.prompt.slice(0, 100) + "...",
+    prompt: payload.prompt.slice(0, 120) + "...",
     duration: payload.duration,
     resolution: payload.resolution,
-    referenceImagesCount: payload.reference_images.length
+    hasUserPhoto,
+    referenceImagesCount: payload.reference_images ? payload.reference_images.length : 0
   });
 
   const response = await fetch(endpoint, {

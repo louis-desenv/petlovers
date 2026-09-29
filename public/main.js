@@ -78,6 +78,8 @@ const state = {
   progress:     0,
   currentPhase: 1,        // Parte 1 (Animal), Parte 2 (Cenário), Parte 3 (Ação/Vídeo)
   photoRequested: false,  // Se o Dr. Miau solicitou uma foto na fase atual
+  photoRefused: false,    // Se o tutor optou por não enviar foto e continuar só com a descrição
+  userHasSentPhoto: false,// Se o tutor já enviou foto nesta conversa
   selectedImageBase64: null, // Imagem em base64 pendente de envio
   selectedImageMime: "image/jpeg",
   animating:    false,    // job Magic Hour em andamento
@@ -110,6 +112,8 @@ function saveStateToCache() {
       progress: state.progress,
       currentPhase: state.currentPhase,
       photoRequested: state.photoRequested,
+      photoRefused: state.photoRefused,
+      userHasSentPhoto: state.userHasSentPhoto,
       lastGeneratedPrompt: state.lastGeneratedPrompt,
       lastUserSubmission: state.lastUserSubmission
     };
@@ -130,6 +134,8 @@ function loadStateFromCache() {
       if (typeof parsed.progress === "number") state.progress = parsed.progress;
       if (typeof parsed.currentPhase === "number") state.currentPhase = parsed.currentPhase;
       if (typeof parsed.photoRequested === "boolean") state.photoRequested = parsed.photoRequested;
+      if (typeof parsed.photoRefused === "boolean") state.photoRefused = parsed.photoRefused;
+      if (typeof parsed.userHasSentPhoto === "boolean") state.userHasSentPhoto = parsed.userHasSentPhoto;
       if (parsed.lastGeneratedPrompt) state.lastGeneratedPrompt = parsed.lastGeneratedPrompt;
       if (parsed.lastUserSubmission) state.lastUserSubmission = parsed.lastUserSubmission;
     }
@@ -286,10 +292,34 @@ function handleImageSelect(file) {
   reader.onload = (e) => {
     state.selectedImageBase64 = e.target.result;
     state.selectedImageMime = file.type || "image/jpeg";
+    state.userHasSentPhoto = true;
+    state.photoRefused = false;
+    state.photoRequested = false;
+    saveStateToCache();
     showPhotoPreviewTray(e.target.result);
+    renderMiniHistory();
   };
   reader.readAsDataURL(file);
 }
+
+window.triggerPetPhotoUpload = function() {
+  const fileInput = document.getElementById("imageFileInput");
+  if (fileInput) {
+    fileInput.click();
+  }
+};
+
+window.skipPetPhotoUpload = function() {
+  state.photoRefused = true;
+  state.photoRequested = false;
+  saveStateToCache();
+  renderMiniHistory();
+  
+  const skipText = "Prefiro continuar apenas com a descrição do meu pet";
+  pushMessage("Voce", skipText);
+  if (ui.messageInput) ui.messageInput.value = "";
+  handleChatRequest(skipText);
+};
 
 function clearSelectedImage() {
   state.selectedImageBase64 = null;
@@ -704,6 +734,31 @@ function renderMiniHistory() {
           retryLastInstruction();
         });
         item.append(retryAction);
+      }
+
+      // Se o Dr. Miau solicitou foto e o tutor ainda não enviou nem recusou, exibe o card interativo
+      if (msg === lastEight[lastEight.length - 1] && !isMe && state.photoRequested && !state.userHasSentPhoto && !state.photoRefused && !state.generating) {
+        const photoCard = document.createElement("div");
+        photoCard.className = "chat-photo-prompt-card";
+        photoCard.innerHTML = `
+          <div class="photo-prompt-card__header">
+            <span class="photo-prompt-card__icon" aria-hidden="true">📸</span>
+            <div class="photo-prompt-card__texts">
+              <strong>Gostaria de enviar uma foto do seu pet?</strong>
+              <p>A foto servirá como referência para personalizar o vídeo 3D. Se preferir, podemos continuar apenas com a sua descrição!</p>
+            </div>
+          </div>
+          <div class="photo-prompt-card__actions">
+            <button type="button" class="photo-prompt-btn photo-prompt-btn--upload" onclick="window.triggerPetPhotoUpload()">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+              Enviar foto do pet
+            </button>
+            <button type="button" class="photo-prompt-btn photo-prompt-btn--skip" onclick="window.skipPetPhotoUpload()">
+              Continuar apenas com a descrição
+            </button>
+          </div>
+        `;
+        item.append(photoCard);
       }
 
       // Renderiza o player de vídeo real se completado ou o status de renderização se pendente
@@ -1279,7 +1334,8 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
     const sessionState = {
       currentPhase: state.currentPhase || 1,
       progress: state.progress || 0,
-      photoReceived: Boolean(imageBase64 || history.some(h => h.image))
+      photoReceived: Boolean(imageBase64 || state.userHasSentPhoto || history.some(h => h.image)),
+      photoRefused: Boolean(state.photoRefused)
     };
 
     // Tenta primeiro via SSE Streaming em tempo real para latência quase zero
@@ -1411,8 +1467,10 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
     }
 
     // Registra se uma foto foi solicitada pelo Dr. Miau
-    if (data.photo_requested || (state.currentPhase === 1 && (data.response.toLowerCase().includes("foto") || data.response.toLowerCase().includes("fotinha")))) {
+    if (data.photo_requested && !state.userHasSentPhoto && !state.photoRefused) {
       state.photoRequested = true;
+    } else if (state.userHasSentPhoto || state.photoRefused) {
+      state.photoRequested = false;
     }
 
     const addedMsg = pushMessage("Agente", data.response);
