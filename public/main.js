@@ -13,7 +13,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 // ─── Mensagem inicial ─────────────────────────────────────────────────────────
 const INITIAL_MESSAGE =
-  "Olá, eu sou o Dr. Miau, veterinário e apaixonado por todas as espécies do reino animal! 🐾🎬 Tenho uma surpresa especial preparada para o seu pet no final da nossa conversa. Para isso ficar incrível, me conta: qual é o nome dele e que espécie de animalzinho é?";
+  "Olá! Sou o Dr. Miau. Estou aqui para ajudar você a criar uma cena 3D personalizada com o seu pet. Para começarmos, qual é o nome do seu companheiro e que tipo de animalzinho ele é? 🐾";
 
 // ─── Pool de Animações com Chance (%) ─────────────────────────────────────────
 const ANIMATION_POOL = {
@@ -1192,8 +1192,6 @@ async function pollVideoStatus(jobId, messageId, videoPrompt = "") {
           );
         }
 
-        openVideoModal(progress.videoUrl);
-
         setTimeout(() => {
           updateVideoProgressUI(0, "", false);
         }, 2500);
@@ -1257,45 +1255,13 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
   setDockTitle("Dr. Miau está pensando...");
   showSpeaking(false);
 
-  let fullMessageToAgent = userText;
-
-  if (imageBase64) {
-    if (ui.bubbleText) {
-      ui.bubbleText.innerHTML = 'Nosso Agente de Visão está analisando a foto<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
-    }
-    setDockTitle("Agente de Visão analisando foto...");
-
-    try {
-      const visionRes = await fetch("/api/analyze-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64: imageBase64,
-          mimeType: imageMime || "image/jpeg",
-          phase: state.currentPhase
-        })
-      });
-
-      const visionData = await visionRes.json().catch(() => null);
-      if (visionData && visionData.description) {
-        console.log("✅ [Agente de Visão Output]:", visionData.description);
-        const phaseTitle = state.currentPhase === 1 ? "Parte 1 - O Animal" : state.currentPhase === 2 ? "Parte 2 - O Cenário" : "Parte 3 - O Vídeo";
-        
-        let extraPhotoContext = "";
-        if (state.currentPhase === 1) {
-          extraPhotoContext = "\n(NOTA IMPORTANTE DA FASE 1: Esta foto serve para ajudar a identificar e descrever o animal. Continue na Fase 1 explorando com carinho os parâmetros obrigatórios: nome do bichinho, raça se aplicável, coloração de pelos/pele e se possui manchas, deficiência ou avariação, antes de qualquer menção ao cenário do vídeo).";
-        }
-        
-        fullMessageToAgent = `[IMAGEM ANALISADA PELO AGENTE DE VISÃO ESPECIALISTA (${phaseTitle})]: ${visionData.description}${extraPhotoContext}\n\nComentário do usuário: ${userText || "Veja esta foto do meu pet!"}`;
-      }
-    } catch (visionErr) {
-      console.warn("⚠️ Não foi possível analisar imagem via Agente de Visão:", visionErr);
-    }
-  }
-
   if (ui.bubbleText) {
-    ui.bubbleText.innerHTML = 'Dr. Miau está pensando<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+    ui.bubbleText.innerHTML = imageBase64 
+      ? 'Recebendo a foto do seu pet<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>'
+      : 'Dr. Miau está pensando<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
   }
+
+  const messageToSend = userText || (imageBase64 ? "Enviei a foto do meu pet 📸" : "");
 
   try {
     const history = state.messages
@@ -1312,7 +1278,8 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
 
     const sessionState = {
       currentPhase: state.currentPhase || 1,
-      progress: state.progress || 0
+      progress: state.progress || 0,
+      photoReceived: Boolean(imageBase64 || history.some(h => h.image))
     };
 
     // Tenta primeiro via SSE Streaming em tempo real para latência quase zero
@@ -1320,7 +1287,13 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
       const streamRes = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: fullMessageToAgent, history, sessionState })
+        body: JSON.stringify({ 
+          message: messageToSend, 
+          image: imageBase64 || null,
+          mimeType: imageMime || "image/jpeg",
+          history, 
+          sessionState 
+        })
       });
 
       if (streamRes.ok && streamRes.body) {
@@ -1377,7 +1350,13 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ message: fullMessageToAgent, history, sessionState })
+        body: JSON.stringify({ 
+          message: messageToSend, 
+          image: imageBase64 || null,
+          mimeType: imageMime || "image/jpeg",
+          history, 
+          sessionState 
+        })
       });
 
       if (!res.ok) {
@@ -1427,16 +1406,42 @@ async function agentRespond(userText, imageBase64 = null, imageMime = null) {
     if (data.phase !== undefined) {
       state.currentPhase = data.phase;
     }
+    if (data.pet_profile) {
+      state.petProfile = data.pet_profile;
+    }
 
-    // Registra que uma foto foi solicitada apenas se estivermos na fase 1
-    const respLower = data.response.toLowerCase();
-    if (state.currentPhase === 1 && (respLower.includes("foto") || respLower.includes("fotinha"))) {
+    // Registra se uma foto foi solicitada pelo Dr. Miau
+    if (data.photo_requested || (state.currentPhase === 1 && (data.response.toLowerCase().includes("foto") || data.response.toLowerCase().includes("fotinha")))) {
       state.photoRequested = true;
     }
 
     const addedMsg = pushMessage("Agente", data.response);
     setBubble(data.response);
     setDockTitle("Pronto para conversar");
+
+    // Se estiver na etapa de confirmação, renderiza botão de confirmação rápida no chat
+    if (data.ready_for_confirmation) {
+      state.readyForConfirmation = true;
+      setTimeout(() => {
+        const miniContainer = ui.miniHistory || document.getElementById("miniHistory");
+        if (miniContainer && !document.getElementById("quickConfirmBox")) {
+          const confirmBox = document.createElement("div");
+          confirmBox.id = "quickConfirmBox";
+          confirmBox.className = "quick-confirm-box";
+          confirmBox.innerHTML = `
+            <button class="quick-confirm-btn" onclick="window.sendQuickConfirmation()">
+              🎬 Sim, autorizar e gerar animação 3D agora! ✨
+            </button>
+          `;
+          miniContainer.appendChild(confirmBox);
+          scrollToBottom(miniContainer, true);
+        }
+      }, 300);
+    } else {
+      state.readyForConfirmation = false;
+      const oldBox = document.getElementById("quickConfirmBox");
+      if (oldBox) oldBox.remove();
+    }
 
     // Se a resposta contiver um video_prompt gerado para o estúdio de vídeo, guarda para consulta/testes
     if (data.video_prompt && typeof data.video_prompt === "string" && data.video_prompt.trim()) {
@@ -1586,8 +1591,10 @@ function transitionToVideo(videoUrl) {
   };
   
   try {
-    currentInactive.load();
     currentInactive.muted = true;
+    currentInactive.defaultMuted = true;
+    currentInactive.volume = 0;
+    currentInactive.load();
     
     // Transiciona assim que começar a reproduzir de fato
     currentInactive.onplaying = () => {
@@ -1596,6 +1603,9 @@ function transitionToVideo(videoUrl) {
     
     // Se o navegador demorar ou tiver restrição, canplay serve como fallback acelerado
     currentInactive.oncanplay = () => {
+      currentInactive.muted = true;
+      currentInactive.defaultMuted = true;
+      currentInactive.volume = 0;
       currentInactive.play()
         .then(() => {
           performSwitch();
@@ -1933,7 +1943,15 @@ window.openGalleryModal = (open = null) => {
 window.toggleGalleryModal = () => GalleryManager.toggle();
 window.closeGalleryModal = () => GalleryManager.close();
 window.deleteGalleryVideo = (id) => GalleryManager.delete(id);
-window.saveGalleryVideo = (url, prompt, name) => GalleryManager.save(url, prompt, name);
+window.sendQuickConfirmation = () => {
+  const oldBox = document.getElementById("quickConfirmBox");
+  if (oldBox) oldBox.remove();
+  if (state.generating) return;
+  const confirmText = "Sim! Pode iniciar a renderização 3D na Atlas Cloud agora mesmo!";
+  if (ui.messageInput) ui.messageInput.value = "";
+  pushMessage("Voce", confirmText);
+  agentRespond(confirmText, null, null);
+};
 function getSavedGalleryVideos() { return GalleryManager.getAll(); }
 function saveGalleryVideo(url, prompt, name) { GalleryManager.save(url, prompt, name); }
 function deleteGalleryVideo(id) { GalleryManager.delete(id); }

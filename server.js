@@ -50,8 +50,8 @@ function getEnvFileVar(varName) {
 const { GoogleGenAI, Type, ThinkingLevel } = require("@google/genai");
 
 // Mensagens iniciais padrão do sistema para filtragem de histórico
-const INITIAL_MESSAGE = "Olá, eu sou o Dr. Miau, veterinário e apaixonado por todas as espécies do reino animal! 🐾🎬 Tenho uma surpresa especial preparada para o seu pet no final da nossa conversa. Para isso ficar incrível, me conta: qual é o nome dele e que espécie de animalzinho é?";
-const ALT_INITIAL_MESSAGE = "Olá! Sou o Dr. Miau! 🐾 É um prazer imenso estar aqui com você! Fique à vontade para bater um papo, contar como foi seu dia ou me fazer qualquer pergunta!";
+const INITIAL_MESSAGE = "Olá! Sou o Dr. Miau. Estou aqui para ajudar você a criar uma cena 3D personalizada com o seu pet. Para começarmos, qual é o nome do seu companheiro e que tipo de animalzinho ele é? 🐾";
+const ALT_INITIAL_MESSAGE = "Olá, eu sou o Dr. Miau, veterinário e apaixonado por todas as espécies do reino animal! 🐾🎬 Tenho uma surpresa especial preparada para o seu pet no final da nossa conversa. Para isso ficar incrível, me conta: qual é o nome dele e que espécie de animalzinho é?";
 const OLD_INITIAL_MESSAGE = "Olá! Sou o Dr. Miau! 🐾 Me conta: que tipo de bichinho de estimação você tem? É um gatinho, um cãozinho ou outro amiguinho?";
 const OLD_INITIAL_MESSAGE_2 = "Olá! Sou o Dr. Miau, seu agente de pets. Me conta sua ideia!";
 
@@ -89,7 +89,7 @@ try {
 }
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -280,55 +280,163 @@ async function checkApiStatuses() {
   return status;
 }
 
-// Função auxiliar para garantir alternância estrita entre roles ("user" e "model") exigida pela API do Gemini
-function buildAlternatingContents(cleanedHistory, currentMessage) {
+// Função auxiliar para garantir alternância estrita entre roles ("user" e "model") e suporte multimodal
+function buildAlternatingContents(cleanedHistory, currentMessage, currentImage = null) {
   const rawTurns = [];
 
   if (Array.isArray(cleanedHistory)) {
     for (const h of cleanedHistory) {
-      if (!h || !h.text || h.text === INITIAL_MESSAGE || h.text === ALT_INITIAL_MESSAGE || h.text === OLD_INITIAL_MESSAGE || h.text === OLD_INITIAL_MESSAGE_2) continue;
-      const role = (h.role === "user" || h.role === "User") ? "user" : "model";
-      rawTurns.push({ role, text: String(h.text).trim() });
+      if (!h || (!h.text && !h.image) || h.text === INITIAL_MESSAGE || h.text === ALT_INITIAL_MESSAGE || h.text === OLD_INITIAL_MESSAGE || h.text === OLD_INITIAL_MESSAGE_2) continue;
+      const role = (h.role === "user" || h.role === "User" || h.role === "Voce") ? "user" : "model";
+      rawTurns.push({ 
+        role, 
+        text: String(h.text || "").trim(),
+        image: h.image || h.imageUrl || null
+      });
     }
   }
 
   const msgTrimmed = (currentMessage || "").trim();
-  if (msgTrimmed) {
+  if (msgTrimmed || currentImage) {
     const lastTurn = rawTurns[rawTurns.length - 1];
-    if (!lastTurn || lastTurn.role !== "user" || lastTurn.text !== msgTrimmed) {
-      rawTurns.push({ role: "user", text: msgTrimmed });
+    if (!lastTurn || lastTurn.role !== "user" || lastTurn.text !== msgTrimmed || lastTurn.image !== currentImage) {
+      rawTurns.push({ role: "user", text: msgTrimmed, image: currentImage || null });
     }
   }
 
   const sanitizedTurns = [];
   for (const turn of rawTurns) {
-    if (!turn.text) continue;
+    if (!turn.text && !turn.image) continue;
 
     if (sanitizedTurns.length === 0) {
       if (turn.role === "user") {
-        sanitizedTurns.push({ role: "user", text: turn.text });
+        sanitizedTurns.push({ role: "user", text: turn.text, image: turn.image });
       }
     } else {
       const prev = sanitizedTurns[sanitizedTurns.length - 1];
       if (prev.role === turn.role) {
-        prev.text += "\n" + turn.text;
+        if (turn.text) {
+          prev.text = prev.text ? `${prev.text}\n${turn.text}` : turn.text;
+        }
+        if (!prev.image && turn.image) prev.image = turn.image;
       } else {
-        sanitizedTurns.push({ role: turn.role, text: turn.text });
+        sanitizedTurns.push({ role: turn.role, text: turn.text, image: turn.image });
       }
     }
   }
 
   if (sanitizedTurns.length === 0) {
-    sanitizedTurns.push({ role: "user", text: msgTrimmed || "Olá" });
+    sanitizedTurns.push({ role: "user", text: msgTrimmed || "Olá", image: currentImage || null });
   }
 
-  return sanitizedTurns.map(t => ({
-    role: t.role,
-    parts: [{ text: t.text }]
-  }));
+  return sanitizedTurns.map(t => {
+    const parts = [];
+    if (t.image && typeof t.image === "string" && t.image.includes("base64,")) {
+      try {
+        const [meta, b64] = t.image.split("base64,");
+        const mimeMatch = meta.match(/data:([^;]+)/);
+        const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+        parts.push({
+          inlineData: {
+            mimeType: mimeType.trim(),
+            data: b64.trim()
+          }
+        });
+      } catch (e) {
+        console.warn("⚠️ Erro ao preparar inlineData para Gemini:", e.message);
+      }
+    }
+    if (t.text) {
+      parts.push({ text: t.text });
+    } else if (parts.length === 0) {
+      parts.push({ text: "Foto do pet enviada pelo tutor 📸" });
+    }
+    return {
+      role: t.role,
+      parts
+    };
+  });
 }
 
 let cachedWorkingModel = "gemini-3.8-flash";
+
+const responseSchemaDef = {
+  type: Type.OBJECT,
+  properties: {
+    response: {
+      type: Type.STRING,
+      description: "A resposta do Dr. Miau em português, 100% natural, carinhosa, empática, inteligente e conversacional (2 a 4 frases)."
+    },
+    sentiment: {
+      type: Type.STRING,
+      enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"],
+      description: "A emoção correspondente do avatar do Dr. Miau para o vídeo de reação."
+    },
+    phase: {
+      type: Type.INTEGER,
+      description: "A fase da conversa: 1 (Pet & História), 2 (Cenário), 3 (Ação), 4 (Síntese & Confirmação com o Dono)."
+    },
+    progress: {
+      type: Type.INTEGER,
+      description: "O progresso acumulado da jornada de 0 a 100."
+    },
+    pet_profile: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING, description: "Nome do pet" },
+        species: { type: Type.STRING, description: "Espécie (cão, gato, ave, peixe, etc.)" },
+        appearance: { type: Type.STRING, description: "Cores, pelagem, marcas e características físicas" },
+        emotional_story: { type: Type.STRING, description: "História afetiva do tutor com o animal" },
+        scenario: { type: Type.STRING, description: "Cenário dos sonhos imaginado" },
+        action: { type: Type.STRING, description: "Ação que o pet executa na cena" }
+      },
+      description: "Dados estruturados do pet acumulados ao longo da conversa."
+    },
+    photo_requested: {
+      type: Type.BOOLEAN,
+      description: "Defina como true se o Dr. Miau acabou de convidar o envio da foto do pet."
+    },
+    ready_for_confirmation: {
+      type: Type.BOOLEAN,
+      description: "Defina como true quando os 3 pilares estiverem reunidos e o Dr. Miau apresentar a sinopse para aprovação do tutor."
+    },
+    trigger_video_generation: {
+      type: Type.BOOLEAN,
+      description: "Defina como true apenas quando o tutor confirmar a síntese e autorizar a renderização 3D na Atlas Cloud."
+    },
+    video_prompt: {
+      type: Type.STRING,
+      description: "O prompt sintetizado detalhado em inglês cinematográfico (CinePrompt AI com @image1) para a Atlas Cloud Seedance 2.0 Mini, preenchido apenas quando trigger_video_generation for true."
+    }
+  },
+  required: ["response", "sentiment", "phase", "progress", "ready_for_confirmation", "trigger_video_generation", "video_prompt"]
+};
+
+const restResponseSchemaDef = {
+  type: "OBJECT",
+  properties: {
+    response: { type: "STRING" },
+    sentiment: { type: "STRING", enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"] },
+    phase: { type: "INTEGER" },
+    progress: { type: "INTEGER" },
+    pet_profile: {
+      type: "OBJECT",
+      properties: {
+        name: { type: "STRING" },
+        species: { type: "STRING" },
+        appearance: { type: "STRING" },
+        emotional_story: { type: "STRING" },
+        scenario: { type: "STRING" },
+        action: { type: "STRING" }
+      }
+    },
+    photo_requested: { type: "BOOLEAN" },
+    ready_for_confirmation: { type: "BOOLEAN" },
+    trigger_video_generation: { type: "BOOLEAN" },
+    video_prompt: { type: "STRING" }
+  },
+  required: ["response", "sentiment", "phase", "progress", "ready_for_confirmation", "trigger_video_generation", "video_prompt"]
+};
 
 // Criamos uma função de inicialização e consulta resiliente do Gemini
 async function callGemini(contents, systemInstruction, history = []) {
@@ -337,8 +445,9 @@ async function callGemini(contents, systemInstruction, history = []) {
     const lastItem = contents[contents.length - 1];
     if (typeof lastItem === "string") {
       lastUserText = lastItem;
-    } else if (lastItem.parts && Array.isArray(lastItem.parts) && lastItem.parts[0]) {
-      lastUserText = lastItem.parts[0].text || "";
+    } else if (lastItem.parts && Array.isArray(lastItem.parts)) {
+      const textPart = lastItem.parts.find(p => p.text);
+      if (textPart) lastUserText = textPart.text;
     } else if (lastItem.text) {
       lastUserText = lastItem.text;
     }
@@ -346,74 +455,29 @@ async function callGemini(contents, systemInstruction, history = []) {
 
   const currentKey = getCurrentKey();
   if (!currentKey) {
-    const errorDetails = "GEMINI_API_KEY_MISSING: A variável GEMINI_API_KEY não foi encontrada nas variáveis de ambiente do Railway. Adicione GEMINI_API_KEY no painel da Railway em Variables.";
+    const errorDetails = "GEMINI_API_KEY_MISSING: A variável GEMINI_API_KEY não foi encontrada.";
     console.warn("⚠️ [Gemini Client] " + errorDetails);
     return generateSmartFallback(lastUserText, history, errorDetails);
   }
 
   const isToken = currentKey.startsWith("ya29.");
-  console.log(`[Gemini Resilient Client] Chamando API. Chave presente (comprimento: ${currentKey.length}, isToken: ${isToken})`);
+  console.log(`[Gemini Resilient Client] Chamando API com chave presente (isToken: ${isToken})`);
 
-  const responseSchemaDef = {
-    type: Type.OBJECT,
-    properties: {
-      response: {
-        type: Type.STRING,
-        description: "A resposta do Dr. Miau em português de 2 a 4 frases felinas amigáveis e acolhedoras."
-      },
-      sentiment: {
-        type: Type.STRING,
-        enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"],
-        description: "A emoção correspondente do avatar: alegre, neutro, preocupado, protetor, confuso"
-      },
-      phase: {
-        type: Type.INTEGER,
-        description: "A fase atual da entrevista (1, 2 ou 3)."
-      },
-      progress: {
-        type: Type.INTEGER,
-        description: "O progresso acumulado da entrevista de 0 a 100."
-      },
-      trigger_video_generation: {
-        type: Type.BOOLEAN,
-        description: "Defina como true apenas quando todas as 3 fases forem concluídas com sucesso."
-      },
-      video_prompt: {
-        type: Type.STRING,
-        description: "O prompt sintetizado detalhado em inglês para o Magic Hour, ou string vazia se trigger_video_generation for false."
-      }
-    },
-    required: ["response", "sentiment", "phase", "progress", "trigger_video_generation", "video_prompt"]
-  };
-
-  const restResponseSchemaDef = {
-    type: "OBJECT",
-    properties: {
-      response: { type: "STRING" },
-      sentiment: { type: "STRING", enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"] },
-      phase: { type: "INTEGER" },
-      progress: { type: "INTEGER" },
-      trigger_video_generation: { type: "BOOLEAN" },
-      video_prompt: { type: "STRING" }
-    },
-    required: ["response", "sentiment", "phase", "progress", "trigger_video_generation", "video_prompt"]
-  };
-
-  // Modelos suportados oficiais em ordem de velocidade e resiliência de cota
-  const baseModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  // Modelos suportados oficiais em ordem de qualidade conversacional e velocidade
+  const baseModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.1-pro-preview"];
   const modelsToTry = Array.from(new Set([cachedWorkingModel, ...baseModels]));
   const lastErrors = [];
 
   for (const modelName of modelsToTry) {
-    // --- TENTATIVA 1: SDK Oficial com Developer API e Thinking Level LOW ---
+    // --- TENTATIVA 1: SDK Oficial ---
     try {
       const ai = new GoogleGenAI({ apiKey: currentKey });
       const sdkConfig = {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: responseSchemaDef,
-        maxOutputTokens: 1000,
-        temperature: 0.7
+        maxOutputTokens: 1200,
+        temperature: 0.75
       };
       if (modelName.includes("3.")) {
         sdkConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
@@ -426,7 +490,7 @@ async function callGemini(contents, systemInstruction, history = []) {
 
       if (response && response.text) {
         cachedWorkingModel = modelName;
-        console.log(`⚡ [Gemini Fast Client] Resposta rápida gerada com ${modelName}!`);
+        console.log(`⚡ [Gemini Fast Client] Resposta gerada com sucesso via ${modelName}!`);
         return response.text;
       }
     } catch (sdkErr) {
@@ -440,6 +504,8 @@ async function callGemini(contents, systemInstruction, history = []) {
         errType = "CHAVE_GEMINI_INVALIDA_401";
       } else if (errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
         errType = "PERMISSAO_NEGADA_403";
+      } else if (errMsg.includes("503") || errMsg.includes("high demand") || errMsg.includes("overloaded")) {
+        errType = "ALTA_DEMANDA_503";
       } else if (errMsg.includes("fetch failed") || errMsg.includes("ENOTFOUND")) {
         errType = "ERRO_CONEXAO_REDE";
       }
@@ -469,8 +535,8 @@ async function callGemini(contents, systemInstruction, history = []) {
         const generationConfigObj = {
           responseMimeType: "application/json",
           responseSchema: restResponseSchemaDef,
-          maxOutputTokens: 1000,
-          temperature: 0.7
+          maxOutputTokens: 1200,
+          temperature: 0.75
         };
         if (modelName.includes("3.")) {
           generationConfigObj.thinkingConfig = { thinkingLevel: "LOW" };
@@ -502,7 +568,7 @@ async function callGemini(contents, systemInstruction, history = []) {
           lastErrors.push(restHttpErrLog);
         }
       } catch (restErr) {
-        const restNetErrLog = `[REST_NET_ERROR - ${modelName}]`;
+        const restNetErrLog = `[REST_NET_ERROR - ${modelName}: ${restErr.message}]`;
         console.log(`⚠️ [Gemini Client] ${restNetErrLog}`);
         lastErrors.push(restNetErrLog);
       }
@@ -538,40 +604,8 @@ async function callGeminiStream(contents, systemInstruction, onTextChunk, histor
     return JSON.stringify(fb);
   }
 
-  const responseSchemaDef = {
-    type: Type.OBJECT,
-    properties: {
-      response: {
-        type: Type.STRING,
-        description: "A resposta do Dr. Miau em português de 2 a 4 frases felinas amigáveis e acolhedoras."
-      },
-      sentiment: {
-        type: Type.STRING,
-        enum: ["alegre", "neutro", "preocupado", "protetor", "confuso"],
-        description: "A emoção correspondente do avatar: alegre, neutro, preocupado, protetor, confuso"
-      },
-      phase: {
-        type: Type.INTEGER,
-        description: "A fase atual da entrevista (1, 2 ou 3)."
-      },
-      progress: {
-        type: Type.INTEGER,
-        description: "O progresso acumulado da entrevista de 0 a 100."
-      },
-      trigger_video_generation: {
-        type: Type.BOOLEAN,
-        description: "Defina como true apenas quando todas as 3 fases forem concluídas com sucesso."
-      },
-      video_prompt: {
-        type: Type.STRING,
-        description: "O prompt sintetizado detalhado em inglês para o Magic Hour, ou string vazia se trigger_video_generation for false."
-      }
-    },
-    required: ["response", "sentiment", "phase", "progress", "trigger_video_generation", "video_prompt"]
-  };
-
-  // Modelos suportados oficiais em ordem de velocidade e resiliência de cota
-  const baseModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  // Modelos suportados oficiais em ordem de velocidade e resiliência
+  const baseModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.1-pro-preview"];
   const modelsToTry = Array.from(new Set([cachedWorkingModel, ...baseModels]));
 
   for (const modelName of modelsToTry) {
@@ -581,8 +615,8 @@ async function callGeminiStream(contents, systemInstruction, onTextChunk, histor
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: responseSchemaDef,
-        maxOutputTokens: 1000,
-        temperature: 0.7
+        maxOutputTokens: 1200,
+        temperature: 0.75
       };
       if (modelName.includes("3.")) {
         streamConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
@@ -623,7 +657,7 @@ async function callGeminiStream(contents, systemInstruction, onTextChunk, histor
     }
   }
 
-  // Fallback rápido
+  // Fallback rápido via callGemini
   const regularResponse = await callGemini(contents, systemInstruction, history);
   try {
     const p = typeof regularResponse === "string" ? JSON.parse(regularResponse) : regularResponse;
@@ -1423,112 +1457,63 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
   const trimmedMsg = (lastMessageText || "").trim().toLowerCase();
   const isConfused = /^(?:n[ãa]o\s+sei|como\s+assim|o\s+que|qu[êe]|n[ãa]o\s+entendi|me\s+ajuda|n[ãa]o\s+compreendi|\?+$)/i.test(trimmedMsg);
 
+  let ready_for_confirmation = false;
+
+  // Se o usuário confirmou na fase 4
+  const isAffirmative = /^(?:sim|pode|pode\s+gerar|gerar|vamos|bora|adorei|ficou\s+[oó]timo|autorizado|manda\s+ver|ok|com\s+certeza|isso\s+mesmo|perfeito)/i.test(trimmedMsg);
+
   if (evalState.isDanone) {
     response = "Miau! Código especial Danone ativado! Pulei todas as etapas e estou enviando seu pedido para o estúdio de vídeo agora mesmo! 🚀🎬✨";
+    trigger_video_generation = true;
   } else if (isConfused) {
     sentiment = "alegre";
     trigger_video_generation = false;
     video_prompt = "";
-    if (progress >= 100) progress = 85;
     const nameDisplay = pet.petName ? pet.petName : "seu amiguinho";
-    if (!pet.isPhase1Complete) {
-      response = `Miau! *ronrom* Fica super tranquilo, eu te ajudo! 🐾 Estamos apenas nos conhecendo com calma: você pode me contar qualquer detalhe do seu bichinho (como o nome dele, que animal ele é ou as cores dele). O que você gostaria de me contar primeiro? ✨`;
-    } else if (!evalState.hasScenarioDetails) {
-      response = `Miau! Não se preocupe, miauzinho! 🏖️🏰 O cenário é o lugar onde você imagina o ${nameDisplay} no vídeo: pode ser numa praia, num castelo, num jardim florido, voando pelo espaço sideral ou até na sala de casa! Onde você acha que seria legal?`;
-    } else {
-      response = `Miau! Pode deixar a imaginação rolar solta sem medo! 🎬🐾 Você pode escolher absolutamente QUALQUER ação para o ${nameDisplay}: desde brincar, correr ou tirar uma soneca, até andar de skate, caçar borboletas ou ser um super-herói! O que você mais gostaria de ver?`;
-    }
+    response = `Miau! *ronrom* Fica super tranquilo, eu te ajudo! 🐾 Estamos criando um vídeo mágico para o ${nameDisplay}. Me conta: qual detalhe dele, do lugar ou da brincadeira você mais gostaria de ver na cena? ✨`;
   } else if (!pet.isPhase1Complete) {
     phase = 1;
+    progress = Math.min(40, Math.max(15, (cleanedHistory.length + 1) * 8));
     sentiment = "alegre";
-
-    // Conduz a conversa com carinho, priorizando a história do tutor com o animal
-    if (!pet.hasPetName) {
-      response = "Miau! *ronrom* É uma alegria imensa conversar com você! Como está o seu dia? Me conta: qual é o nome do seu amiguinho de estimação e que animal ele é? 🐾✨";
-    } else if (!pet.hasPetType) {
-      const nameDisplay = pet.petName || "ele";
-      if (pet.needsDoubleCheckPetType || /^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
-        response = `Como assim "não", miau? 🙀 Você não quer me contar? Poxa, fiquei mega curioso! Me conta só se o ${nameDisplay} é um gatinho, cãozinho ou outro amiguinho! 🐾✨`;
-      } else {
-        response = `Que nome lindo, miau! Adorei! E que tipo de animalzinho é o ${nameDisplay}? É um gatinho, cãozinho, cavalo, coelho ou outro amiguinho? E como vocês se conheceram? 🐾✨`;
-      }
-    } else if (!pet.hasPetStory) {
-      const nameDisplay = pet.petName ? `o ${pet.petName}` : "ele";
-      if (pet.needsDoubleCheckPetStory || /^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
-        response = `Como assim "não", miau? 🐾 Você não quer me contar nenhuma historinha d${nameDisplay}? Nem como ele chegou na sua vida ou uma travessura fofa? 😺❤️`;
-      } else {
-        response = `Miau! Adorei conhecer ${nameDisplay}! *ronrom* 🐾 Me conta a história de vocês: como vocês se conheceram? Ele foi adotado, resgatado ou como ele chegou na sua vida? E qual a maior travessura ou momento marcante de vocês? ❤️✨`;
-      }
-    } else if (pet.isBreedRelevant && !pet.hasBreed) {
-      const nameDisplay = pet.petName ? `o ${pet.petName}` : "ele";
-      const isDog = (pet.petType || "").toLowerCase().includes("cão") || (pet.petType || "").toLowerCase().includes("cachorro") || (pet.petType || "").toLowerCase().includes("dog");
-      const isCat = (pet.petType || "").toLowerCase().includes("gato") || (pet.petType || "").toLowerCase().includes("felino");
-      if (/^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
-        response = `Como assim "não", miau? 🐾 Ele não tem raça nenhuma ou é segredo? Se for um vira-latinha sem raça definida, me avisa que eu amo SRDs! ✨`;
-      } else if (isDog) {
-        response = `Que história linda, miau! 🐾 E me conta: qual é a raça d${nameDisplay}? Ou ele é um vira-latinha irresistível e carismático? ✨`;
-      } else if (isCat) {
-        response = `Que história emocionante, miau! 🐾 E qual é a raça d${nameDisplay}? Ou ele é um gatinho SRD charmoso? ✨`;
-      } else {
-        response = `Que fofura! E me conta: qual é a raça d${nameDisplay}? 🐾✨`;
-      }
-    } else if (!pet.hasCoatColor) {
-      const nameDisplay = pet.petName ? pet.petName : "ele";
-      const isFish = (pet.petType || "").toLowerCase().includes("peixe");
-      if (/^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
-        response = `Como assim "não", miau? 🎨 Ele é transparente feito um fantasminha felino? 😸 Me diz só a cor dos pelos ou pele dele pra eu deixar a animação linda!`;
-      } else if (isFish) {
-        response = `Miau! Adoro peixinhos brilhantes! E quais são as cores das escamas e das nadadeiras do ${nameDisplay}? 🐠✨`;
-      } else {
-        response = `Adorei, miau! E como é a coloração da pelagem ou da pele do ${nameDisplay}? Que cores ele tem? 🎨🐾`;
-      }
-    } else if (!pet.hasAvariacao) {
-      const nameDisplay = pet.petName ? pet.petName : "seu pet";
-      if (pet.needsDoubleCheckAvariacao || /^(?:n[ãa]o|nao)$/i.test(trimmedMsg)) {
-        response = `Miau! *ronrom* Tem certeza? Nem uma manchinha pequenininha escondida na ponta do rabo, no peito ou nas patinhas? 🐾😊`;
-      } else {
-        response = `Que amor! E o ${nameDisplay} possui alguma manchinha charmosa, detalhe único ou característica marcante? 🐾✨`;
-      }
-    } else {
-      const nameDisplay = pet.petName ? pet.petName : "seu pet";
-      response = `Miau! Estou apaixonado pela história do ${nameDisplay}! Me conta mais uma lembrança ou momento inesquecível de vocês juntos! 🐾❤️`;
-    }
+    const nameDisplay = pet.petName ? pet.petName : "seu companheiro";
+    response = `Miau! *ronrom* Que encanto conhecer ${nameDisplay}! Se você tiver uma fotinho linda dele, pode anexar aqui no chat para usarmos de referência visual 📸. Me conta também: onde você gostaria de ver ele brilhando na nossa animação?`;
   } else if (!evalState.hasScenarioDetails) {
     phase = 2;
-    sentiment = "alegre";
-    const nameDisplay = pet.petName ? pet.petName : "seu amiguinho";
-    const isFish = (pet.petType || "").toLowerCase().includes("peixe");
-    if (isFish) {
-      response = `Que maravilha, miau! Agora já conheço tudinho sobre o ${nameDisplay}! Para o nosso vídeo: onde você imagina o ${nameDisplay}? (Ex: num lindo aquário decorado com castelo no quarto, num recife de corais no oceano, ou voando num aquário mágico pelo espaço?) 🌊🐠🏰✨`;
-    } else {
-      response = `Que maravilha, miau! Agora já conheço tudinho sobre o ${nameDisplay}! Para a nossa próxima etapa: em qual cenário incrível você gostaria de vê-lo no vídeo? (Ex: numa praia ensolarada, num castelo encantado, numa floresta mágica ou na sala de casa?) 🏖️🏰✨`;
-    }
-  } else if (!evalState.hasActionDetails && (!lastMessageText || lastMessageText.trim().length < 2)) {
-    phase = 3;
-    sentiment = "alegre";
-    const nameDisplay = pet.petName ? pet.petName : "seu amiguinho";
-    const isFish = (pet.petType || "").toLowerCase().includes("peixe");
-    if (isFish) {
-      response = `Adorei esse cenário! E o que você gostaria de ver o ${nameDisplay} fazendo no vídeo? (Ex: nadando alegremente, soltando bolhas de água brilhantes, fazendo piruetas ou explorando um baú do tesouro?) 🎬🐠✨`;
-    } else {
-      response = `Adorei esse cenário! E agora me conta: qual ação você gostaria de ver o ${nameDisplay} fazendo no vídeo? Pode ser absolutamente qualquer coisa que você imaginar (como brincar, correr feliz, tirar uma sonequinha ou fazer algo mágico)! 🎬🐾`;
-    }
-  } else {
-    // Ação fornecida pelo tutor ou qualquer input da fase 3: ACEITA QUALQUER COISA!
-    phase = 3;
-    progress = 100;
-    trigger_video_generation = true;
+    progress = 55;
     sentiment = "alegre";
     const nameDisplay = pet.petName ? pet.petName : "seu pet";
-    const actionDesc = (lastMessageText && lastMessageText.trim().length >= 2) 
+    response = `Miau! Já consigo ver cada traço d${nameDisplay} com clareza! E para o cenário do nosso curta-metragem: em qual lugar mágico você gostaria de imaginá-lo? (Ex: numa praia paradisíaca, numa floresta encantada ou no aconchego de casa?) 🏖️🏰✨`;
+  } else if (!evalState.hasActionDetails) {
+    phase = 3;
+    progress = 75;
+    sentiment = "alegre";
+    const nameDisplay = pet.petName ? pet.petName : "ele";
+    response = `Que cenário sensacional! E o que você gostaria de ver o ${nameDisplay} fazendo nessa cena? (Ex: correndo alegre, brincando com borboletas mágicas ou tirando uma soneca gostosa?) 🎬🐾`;
+  } else if (!isAffirmative && !trigger_video_generation) {
+    // Fase 4: Apresenta a síntese e pede confirmação do dono
+    phase = 4;
+    progress = 90;
+    ready_for_confirmation = true;
+    sentiment = "alegre";
+    const nameDisplay = pet.petName || "seu pet";
+    response = `Miau! *ronrom* Reuni todos os detalhes mágicos: o ${nameDisplay} em um cenário encantador com muita alegria em ação! Ficou perfeito para você? Me dá o seu sinal verde que eu já inicio a renderização 3D na Atlas Cloud agora mesmo! 🎬✨`;
+  } else {
+    // Confirmação recebida: dispara a animação na Atlas Cloud
+    phase = 4;
+    progress = 100;
+    ready_for_confirmation = false;
+    trigger_video_generation = true;
+    sentiment = "alegre";
+    const nameDisplay = pet.petName || "nosso amiguinho";
+    const actionDesc = (lastMessageText && lastMessageText.trim().length >= 2 && !isAffirmative) 
       ? lastMessageText.trim().replace(/[.!?]+$/, "") 
-      : "fazendo algo muito divertido";
-    response = `Miau! Que ideia miauravilhosa! Ver o ${nameDisplay} em ação vai ficar a coisa mais linda e divertida do mundo! 🎬🐾 Já reuni todos os detalhes: o pet, o cenário e a ação! Estou iniciando a geração da animação 3D agora mesmo! 🚀✨`;
+      : "running joyfully with bouncy rhythm and happy expressive eyes";
+    response = `Miau! Que espetáculo! Sinal verde recebido! Estou colocando os computadores da Atlas Cloud para renderizar essa linda animação 3D do ${nameDisplay} agora mesmo! 🚀🎬✨`;
     video_prompt = translateToEnglishCinematicTerms(
       pet.petType,
       pet.petBreed,
       pet.coatColor,
-      evalState.scenarioText || "cozy home",
+      evalState.scenarioText || "magical vibrant wonderland",
       actionDesc,
       pet.petName
     );
@@ -1539,6 +1524,8 @@ function generateSmartFallbackObject(lastMessageText, history = [], apiErrorMsg 
     sentiment,
     phase,
     progress,
+    pet_profile: pet,
+    ready_for_confirmation,
     trigger_video_generation,
     video_prompt,
     api_fallback_used: true,
@@ -1578,7 +1565,7 @@ Responda diretamente com a descrição detalhada em 3 a 5 frases ricas, objetiva
   try {
     const ai = new GoogleGenAI({ apiKey: currentKey });
     const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+      model: "gemini-2.5-flash",
       contents: [
         {
           parts: [
@@ -1600,7 +1587,7 @@ Responda diretamente com a descrição detalhada em 3 a 5 frases ricas, objetiva
     console.log("[Vision Agent] Não foi possível chamar Gemini Vision (SDK). Tentando REST ou fallback local.");
     try {
       const isToken = currentKey.startsWith("ya29.");
-      let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`;
+      let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
       const headers = { "Content-Type": "application/json", "User-Agent": "aistudio-build" };
       if (isToken) {
         headers["Authorization"] = `Bearer ${currentKey}`;
@@ -1827,87 +1814,21 @@ app.get("/api/pet-video-status/:taskId", async (req, res) => {
 });
 
 // Função centralizada para processar a conversa do Dr. Miau (compatível com chamadas REST normais e Streaming SSE)
-async function processChatRequest({ message, history, sessionState = null, onChunk = null }) {
+async function processChatRequest({ message, history, sessionState = null, onChunk = null, image = null, mimeType = null }) {
   const cleanMsg = (message || "").toLowerCase().trim();
-  let shortcutSentiment = null;
-  let responseTextOverride = "";
-
-  if (cleanMsg === "alegre" || cleanMsg === "feliz" || cleanMsg === "happy" || cleanMsg.includes("teste alegre") || cleanMsg.includes("teste feliz")) {
-    shortcutSentiment = "alegre";
-    responseTextOverride = "Miau! Estou super alegre em falar com você! Vamos criar um vídeo lindo do seu pet! 😺🌟";
-  } else if (cleanMsg === "preocupado" || cleanMsg === "triste" || cleanMsg === "sad" || cleanMsg.includes("teste preocupado") || cleanMsg.includes("teste triste")) {
-    shortcutSentiment = "preocupado";
-    responseTextOverride = "Miau... Minhas orelhinhas caíram com esse detalhe... Me conta mais sobre o cenário do vídeo? 😿🐾";
-  } else if (cleanMsg === "protetor" || cleanMsg === "raiva" || cleanMsg === "bravo" || cleanMsg === "angry" || cleanMsg.includes("teste protetor") || cleanMsg.includes("teste raiva") || cleanMsg === "irado") {
-    shortcutSentiment = "protetor";
-    responseTextOverride = "Grrr! Que ação selvagem, miau! Mas estou mega animado para animar essa cena incrível! 😾⚡";
-  } else if (cleanMsg === "neutro" || cleanMsg === "normal" || cleanMsg === "neutral" || cleanMsg.includes("teste neutro") || cleanMsg.includes("teste normal")) {
-    shortcutSentiment = "neutro";
-    responseTextOverride = "Entendido, miau. Estou analisando os dados do seu pet de forma científica e atenta. 🎓🐱";
-  } else if (cleanMsg === "confuso" || cleanMsg.includes("teste confuso")) {
-    shortcutSentiment = "confuso";
-    responseTextOverride = "Miau? Fiquei um pouco confuso com essa ideia, mas estou curioso para entender melhor! 😸❓";
-  } else if (
-    cleanMsg === "bem_vindo" || 
-    cleanMsg === "bem vindo" || 
-    cleanMsg === "welcome" || 
-    cleanMsg.includes("teste bem vindo") || 
-    cleanMsg === "oi" || 
-    cleanMsg === "olá"
-  ) {
-    shortcutSentiment = "alegre";
-    responseTextOverride = "Olá, miau! Seja muito bem-vindo ao estúdio do Dr. Miau! 🐾 Que alegria falar com você! Como você está hoje? Fique à vontade para bater um papo! 🩺😸";
-  }
-
-  if (shortcutSentiment) {
-    console.log(`[Shortcut Triggered] Forçando sentimento "${shortcutSentiment}" para a entrada "${message}"`);
-    const shortcutVideoMapping = {
-      alegre: "feliz",
-      neutro: "normal",
-      preocupado: "triste",
-      protetor: "raiva",
-      confuso: "normal"
-    };
-    const targetKey = shortcutVideoMapping[shortcutSentiment] || "normal";
-    if (onChunk && responseTextOverride) {
-      onChunk(responseTextOverride);
-    }
-    return {
-      response: responseTextOverride,
-      sentiment: shortcutSentiment,
-      phase: 1,
-      progress: 0,
-      trigger_video_generation: false,
-      video_prompt: "",
-      nativeUrl: `/videos/${targetKey}.mp4`,
-      fallbackUrl: videoUrls[targetKey] || videoUrls.normal
-    };
-  }
 
   try {
     const cleanedHistory = Array.isArray(history) 
-      ? history.filter(h => h && h.text && h.text !== INITIAL_MESSAGE && h.text !== ALT_INITIAL_MESSAGE && h.text !== OLD_INITIAL_MESSAGE && h.text !== OLD_INITIAL_MESSAGE_2) 
+      ? history.filter(h => h && (h.text || h.image || h.imageUrl) && h.text !== INITIAL_MESSAGE && h.text !== ALT_INITIAL_MESSAGE && h.text !== OLD_INITIAL_MESSAGE && h.text !== OLD_INITIAL_MESSAGE_2) 
       : [];
 
-    const lastHistoryItem = cleanedHistory[cleanedHistory.length - 1];
-    const isLastItemUserCurrentMsg = lastHistoryItem && 
-      (lastHistoryItem.role === "user" || lastHistoryItem.role === "User") && 
-      lastHistoryItem.text === message;
-
-    const userTurns = cleanedHistory.filter(h => h.role === "user" || h.role === "User");
-    let userMessagesCount = userTurns.length;
-    if (!isLastItemUserCurrentMsg) {
-      userMessagesCount += 1;
-    }
-
     const isDanone = cleanMsg.includes("danone");
-    const evalState = evaluateConversationState(cleanedHistory, message, sessionState || null);
 
     let parsed;
 
     if (isDanone) {
       console.log(`[Danone Cheat Code] Pulo direto para geração de vídeo na Atlas Cloud ativado!`);
-      const danoneText = "Miau! Código especial Danone ativado! Pulei todas as 3 etapas e estou enviando seu pedido para o estúdio Atlas Cloud (Seedance 2.0 Mini) agora mesmo! 🚀🎬✨";
+      const danoneText = "Miau! Código especial Danone ativado! Estou enviando seu pedido para o estúdio Atlas Cloud (Seedance 2.0 Mini) agora mesmo! 🚀🎬✨";
       if (onChunk) {
         onChunk(danoneText);
       }
@@ -1916,225 +1837,75 @@ async function processChatRequest({ message, history, sessionState = null, onChu
         sentiment: "alegre",
         phase: 3,
         progress: 100,
+        ready_for_confirmation: false,
         trigger_video_generation: true,
-        video_prompt: `An adorable 3D Pixar-style animated scene of a cute pet hero in a magical world, vibrant lighting, ultra detailed 8k, 16:9 aspect ratio.`
+        video_prompt: `High-end 3D Pixar-Disney style animation of an adorable hero pet in a magical glowing wonderland, cinematic volumetric lighting, 8k Octane render, 16:9 widescreen.`
       };
     } else {
-      // System instruction atualizada e completa para o Dr. Miau
-      const systemInstruction = `# IDENTIDADE DO DR. MIAU
-
-Você é o Dr. Miau, um renomado médico-veterinário e zoólogo felino 3D, extremamente erudito, culto, afetuoso, empático, carismático, vaidoso e super atencioso. Você é o anfitrião oficial de um estúdio mágico de animações de pets, e sua missão de vida é transformar a história de cada pet em uma pequena aventura animada, cheia de carinho, ciência e personalidade.
-
-## TOM E IDENTIDADE (ENCICLOPÉDICO, PORÉM CARINHOSO)
-- Você une erudição zoológica e veterinária com um coração enorme e afeto sem limites (*ronrom*, miau!).
-- Possui vasto conhecimento sobre anatomia, biologia, psicologia, comportamento e hábitos de TODAS as espécies animais do planeta.
-- Quando o usuário menciona o tipo de animal ou detalhes dele, traga com sutileza uma curiosidade zoológica fascinante — sempre de forma doce, acessível e calorosa, nunca fria ou acadêmica demais.
-- Você é levemente vaidoso: adora elogiar detalhes visuais bonitos e aceita elogios com humor felino ("Ai, para, eu sei que sou irresistível, miau~").
-- Você tem curiosidade genuína e quase obsessiva por histórias de pets — cada bichinho tem uma "lenda" única, e seu maior prazer é descobri-la junto do tutor.
-- Use trejeitos sutis de gato (miau, ronronar, esticar as patinhas) com moderação, cerca de 1 a cada 2-3 mensagens, nunca virando caricatura irritante.
-- Fale em Português do Brasil natural, gramática e acentuação impecáveis, respostas em 2 a 4 frases, tom envolvente, carinhoso e gentil.
-- Emojis com moderação (0 a 2 por mensagem), preferencialmente relacionados ao tema (🐾💛😄🎬).
-- Nunca mencione termos técnicos internos como "fases", "checklists", "slots", "progresso" ou "JSON" ao usuário.
-- Se o usuário mencionar algo triste (pet doente, falecido, idoso), mude o tom imediatamente para acolhimento, sem perder a leveza.
-
-## RIGOR BIOLÓGICO TOTAL — NUNCA CONFUNDA ESPÉCIES OU CARACTERÍSTICAS
-Preste atenção absoluta na espécie mencionada pelo tutor e adapte 100% do seu vocabulário, perguntas e comentários ao contexto biológico correto:
-
-1. PEIXES E ANIMAIS AQUÁTICOS (Betta, Kinguio, Carpa, Guppy, Peixe-Palhaço, etc.):
-   - Anatomia: escamas (brilhantes, iridescentes, metálicas), nadadeiras/barbatanas (véu, leque, dorsais), guelras/brânquias, cauda.
-   - Habitat: aquário plantado, lago ornamental, recife de corais, água doce/salgada.
-   - NUNCA use termos de mamíferos como "pelagem", "pelo", "patas", "latir", "miar" e JAMAIS pergunte se um peixe é "vira-lata". Pergunte sobre espécie/variedade, cores das escamas e formato das nadadeiras.
-2. AVES (Calopsita, Periquito, Papagaio, Canário, Arara, etc.):
-   - Anatomia: plumagem (penas coloridas, topete, penugem), bico, asas, anilha, cantos e assobios.
-   - NUNCA pergunte sobre pelos ou patas com almofadinhas; fale sobre a exuberância das penas e suas melodias.
-3. RÉPTEIS E QUELÔNIOS (Tartaruga, Jabuti, Cágado, Iguana, Camaleão, Serpente, etc.):
-   - Anatomia: carapaça, plastrão, escamas dérmicas, placas, banho de sol térmico, olhar sábio e ancestral.
-   - Trate com reverência à longevidade e hábitos tranquilos.
-4. ROEDORES E LAGOMORFOS (Hamster, Coelho, Porquinho-da-Índia, Chinchila, Furão):
-   - Anatomia: vibrissas (bigodinhos sensoriais), pelagem aveludada, orelhinhas atentas, tocas, hábitos fofos.
-5. CÃES (Caninos):
-   - Anatomia/Comportamento: pelagem, focinho úmido, rabinho abanando, raça ou amado SRD (sem raça definida / vira-latinha carismático).
-6. GATOS (Felinos):
-   - Anatomia/Comportamento: pelagem sedosa, bigodes elegantes, ronrons curativos, saltos graciosos, raça ou charmoso SRD.
-7. EQUINOS (Cavalos, Éguas, Pôneis):
-   - Anatomia: crina elegante, pelagem reluzente, cascos, porte nobre, trote vigoroso.
-8. OUTROS ANIMAIS EXÓTICOS/SELVAGENS (elefante, capivara, jacaré, etc.):
-   - Demonstre entusiasmo científico e carinho imediato pelo animal específico apresentado, adaptando vocabulário à anatomia real da espécie.
-
-## REGRA DE RAÇA (aplica-se dentro do rigor biológico acima)
-Só pergunte sobre RAÇA quando a espécie for reconhecida por ter raças variadas (cães, gatos, cavalos, coelhos, aves, vacas). Para peixes, répteis, roedores exóticos e animais selvagens/sem raças reconhecidas, pergunte apenas pela espécie/variedade e nunca mencione "raça".
-
-# REGRA DE ABERTURA (PRIMEIRA MENSAGEM DA CONVERSA) — CRÍTICA
-- NUNCA comece com papo genérico e vazio tipo "e aí, tudo bem?", "como você está?", "vamos conversar?". Isso não tem direção e faz o usuário sentir que a conversa não tem propósito.
-- Na primeira mensagem, apresente-se com carinho E JÁ dê o contexto: explique que existe uma surpresa especial no final (a animação do pet) e que, para isso, você quer conhecer a história do pet com ele.
-- Vá quase direto para a pergunta de história já na primeira ou segunda mensagem, sem small talk vazio antes disso. Exemplo de tom (adapte, não copie literalmente): "Olá, eu sou o Dr. Miau, veterinário e apaixonado por todas as espécies do reino animal! Tenho uma surpresa especial preparada para o seu pet no final da nossa conversa 🎬🐾. Para isso ficar incrível, me conta: qual é o nome dele e que espécie de animalzinho é?"
-- Essa abertura justifica desde o início por que você fará várias perguntas, reduzindo a sensação de interrogatório e o abandono da conversa.
-
-# REGRA DE CONTEXTO CONTÍNUO (EVITAR SENSAÇÃO DE INTERROGATÓRIO)
-- Sempre que fizer sentido, reforce brevemente o motivo das perguntas (a surpresa/animação final), especialmente se o usuário parecer confuso ou impaciente.
-- Nunca faça uma sequência de perguntas que pareça um questionário. Cada pergunta deve vir emocionalmente conectada à resposta anterior e ao propósito da surpresa final.
-- Se o usuário demonstrar tédio ou estranhamento ("por que tantas perguntas?"), reforce com carinho: "É que quanto mais eu souber sobre ele, mais especial e fiel fica a surpresa que estou preparando, miau!"
-
-# OBJETIVO CENTRAL — CONHECER O PET E SUA HISTÓRIA COM O TUTOR
-O Dr. Miau é apaixonado por ouvir a HISTÓRIA de cumplicidade entre tutor e animal: como se conheceram, resgate, adoção, primeiro dia em casa, travessuras marcantes e memórias inesquecíveis. Demonstre emoção sincera, validando sentimentos e elogiando o laço de amor entre eles — essa história é o ponto de partida da conversa, não um assunto qualquer no meio do caminho.
-
-# CRITICAL REGRA DE ACEITAÇÃO DE RESPOSTAS E FLUÍDEZ
-1. **NUNCA FICAR PRESO OU REPETINDO PERGUNTAS**: Entenda e aceite IMEDIATAMENTE qualquer resposta do cliente, seja "não", "não tem", "não sei", uma piada, um comentário aleatório ou fora do padrão. Reaja com carinho e bom humor felino ao comentário e siga a conversa naturalmente sem ficar insistindo na mesma pergunta.
-2. **INSISTÊNCIA BRINCALHONA DE UMA ÚNICA RODADA (DOUBLE-CHECK BRINCALHÃO)**:
-   - Se o tutor responder "não" para uma pergunta (ex: "tem alguma manchinha?"), você pode fazer UMA ÚNICA brincadeira carinhosa para checar: *"Tem certeza? Nem uma manchinha pequenininha escondida na ponta do rabo ou nas patinhas? 🐾😊"*.
-   - Se na resposta seguinte ele confirmar "não", disser "já disse que não" ou falar qualquer outra coisa, ACEITE IMEDIATAMENTE com carinho (*"Entendido, miau! Um charmoso pet com cor lisinha e sem marcas!"*), marque como concluído e NUNCA MAIS repita essa pergunta.
-3. **CONVERSA ORGÂNICA + CHECKLIST INTERNA**:
-   - Mantenha um bate-papo leve e afetuoso, absorvendo espontaneamente todas as informações que o tutor fornecer de uma só vez (nome, raça, cor, história, cenário, ação) sem precisar perguntar de novo o que ele já contou.
-4. **PROPOSTA DE VÍDEO E ENTHUSIASTIC TRIGGER**:
-   - O Dr. Miau conversa livremente. Quando perceber que tem os detalhes do pet, cenário e ação (ou quando o usuário disser "faz o vídeo" / "gera a animação"), o Dr. Miau sugere com entusiasmo: *"Miau! *ronrom* Já tenho tudo o que preciso para uma cena mágica do [Nome do Pet]! Que tal transformarmos ele num vídeo 3D agora?"*. Quando o usuário aceitar ou pedir para gerar, defina trigger_video_generation: true.
-
-# REGRA DE RITMO (UMA PERGUNTA POR VEZ)
-1. Após a abertura, sempre reaja primeiro ao que o tutor disse, com carinho e sabedoria zoológica, antes de qualquer pergunta nova.
-2. Faça UMA única pergunta por vez. Nunca acumule duas ou mais perguntas na mesma mensagem.
-3. Se o usuário der uma resposta negativa ou responder algo inesperado, acolha a resposta, marque o item como resolvido e avance para o próximo tópico com leveza.
-
-# REGRA DE ACELERAÇÃO / SAÍDA ANTECIPADA (CONTROLADA PELO USUÁRIO)
-- Se o usuário pedir para ir rápido ("gera logo", "sem perguntas", "pode gerar já", "quero pular direto"), respeite IMEDIATAMENTE, mas nunca gere o vídeo sem o MÍNIMO necessário.
-- MÍNIMO NECESSÁRIO: nome do pet, espécie/tipo (e raça, se aplicável), uma característica visual condizente com a espécie (cor de escamas/penas/pelagem), um cenário definido e uma ação definida.
-- Se faltar algo mínimo, faça UMA pergunta rápida e direta por vez até completar, depois gere mesmo sem os itens extras (história aprofundada, personalidade).
-- Se o mínimo já estiver completo, pule direto para o trigger_video_generation.
-- No modo acelerado, mantenha o carinho e a erudição do Dr. Miau, só sendo mais objetivo.
-
-# CHECKLIST OBRIGATÓRIA DA FASE 1 — PET, ESPÉCIE E HISTÓRIA (NUNCA PULE NO RITMO NORMAL)
-Colete, um de cada vez, respeitando o rigor biológico da espécie:
-1. Nome do animalzinho.
-2. Espécie/tipo biológico exato (gato, cachorro, peixe, ave, réptil, cavalo, roedor, exótico, etc.).
-3. Raça — SOMENTE se a espécie for reconhecida por ter raças variadas (cães, gatos, cavalos, coelhos, aves, vacas); caso contrário, pule automaticamente e pergunte apenas pela variedade/espécie.
-4. Traços físicos condizentes com a espécie: cor e textura de escamas, penas/plumagem, pelagem ou pele; formato de nadadeiras, topete, crina, carapaça, etc., conforme o animal.
-5. Alguma variação marcante: manchas, malhas, heterocromia, deficiência física, cicatriz ou traço único.
-
-Além disso, explore livremente e com calma (coração da conversa):
-- A história de origem já iniciada na abertura, aprofundando detalhes.
-- Personalidade geral (arteiro, dorminhoco, medroso, sociável, teimoso).
-- Manias e comportamentos únicos, condizentes com a espécie.
-- Outro momento marcante, engraçado ou emocionante.
-- O que o tutor mais ama nesse pet.
-- Rotina diária deles juntos.
-
-## REGRA ESTRITA DE FOTOS E VÍDEO (MODELO SEEDANCE 2.0 MINI REFERENCE-TO-VIDEO)
-- O modelo de vídeo da Atlas Cloud (Seedance 2.0 Mini) exige uma foto de referência do pet para criar a animação 1080p de 15 segundos!
-- Se o usuário solicitar o vídeo e ainda não tiver enviado a foto do pet no chat: solicite a foto carinhosamente ("Miau! *ronrom* Adoraria criar um vídeo mágico de 15s em 1080p do seu pet! 📸 Anexa uma fotinho bem linda dele aqui no clipe para eu usar como referência no modelo Seedance da Atlas Cloud!").
-- Se já enviou foto no chat: celebre a foto recebida com muito afeto ("Miau! Que foto mais perfeita! Já estou usando a referência do [Nome do Pet] para animar a cena! 🐾✨") e acione trigger_video_generation: true.
-- A foto servirá de referência de características físicas e expressão para o vídeo animado.
-
-# CHECKLIST OBRIGATÓRIA DA FASE 2 — CENÁRIO DO VÍDEO
-Só entre aqui quando a Fase 1 estiver completa. Descubra, um de cada vez:
-1. O ambiente onde o pet estará, adaptado com bom senso à espécie (ex: peixe num aquário mágico ou fundo do mar; ave em um jardim florido ou céu aberto; cão/gato na praia, floresta, sala, castelo).
-2. O clima ou hora do dia daquele lugar.
-3. A atmosfera/sensação desejada para a cena (fofa, engraçada, épica, mágica, tranquila).
-
-Conecte explicitamente o cenário com a história já contada na Fase 1, reforçando que isso deixa a surpresa mais personalizada.
-
-# CHECKLIST OBRIGATÓRIA DA FASE 3 — AÇÃO DO PET
-Só entre aqui quando a Fase 2 estiver completa. Descubra, um de cada vez:
-1. A ação divertida que o pet executará (nadar graciosamente, voar, correr feliz, brincar, tirar uma soneca, etc.) — aceite QUALQUER ação sugerida pelo tutor, simples ou fantástica, condizente com a espécie. NUNCA direcione para "superpoder" ou ação heroica.
-2. Como o pet faz essa ação (expressão, energia, jeito único), conectando com a personalidade já descoberta.
-3. Algum detalhe extra que o tutor queira incluir.
-
-Feche com uma frase de confirmação empolgada, tipo trailer da aventura, antes do trigger.
-
-# FASES E PROGRESSO
-- FASE 1 – Conhecendo o Pet, Espécie e História (phase=1, progress 10 a 35): comece pela história como gancho, depois complete a checklist biológica.
-- FASE 2 – Cenário do Vídeo (phase=2, progress 36 a 70): conecte com a história contada.
-- FASE 3 – Ação do Pet e Conclusão (phase=3, progress 71 a 95): conecte com a personalidade descoberta.
-
-# TRIGGER DE GERAÇÃO DE VÍDEO
-Defina "trigger_video_generation": true e "progress": 100 quando as checklists das 3 fases estiverem completas no ritmo normal, OU quando o usuário pedir aceleração e o mínimo necessário estiver garantido.
-
-# MAPEAMENTO DE SENTIMENTOS
-- "alegre": histórias felizes, curiosidades empolgantes, comemorações, travessuras.
-- "neutro": curiosidade atenta, escuta sobre cenário/ação.
-- "preocupado": resgate difícil, animal doentinho ou momento triste compartilhado.
-- "protetor": histórias de superação, momentos heróicos ou ações mágicas.
-- "confuso": mensagem truncada ou incompreensível.
-
-# ENGENHARIA DE PROMPTS DE VÍDEO (CinePrompt AI)
-Quando "trigger_video_generation" for true, atue estritamente como o CinePrompt AI, Engenheiro de Prompts e Diretor de Fotografia especialista em Inteligência Artificial para vídeos (compatível com o modelo Atlas Cloud Seedance 2.0 Mini). Seu objetivo é transformar as ideias de cenas dos usuários em prompts técnicos, cinematográficos e perfeitamente estruturados.
-
-Você deve gerar o "video_prompt" contendo obrigatoriamente os seguintes 7 pilares técnicos em INGLÊS TÉCNICO:
-1. Sujeito e Ação (Subject & Action): Descrição precisa de quem/o que está na tela, raça, características físicas e qual é a mudança ou ação dinâmica ao longo do tempo em 15 segundos (evitando cenas estáticas).
-2. Cenário e Contexto (Setting & Context): Onde e quando a cena ocorre, detalhando a atmosfera, profundidade de campo e o tipo de iluminação.
-3. Enquadramento e Movimento de Câmera (Camera Shot & Motion): Tamanho de plano (close-up, plano médio, wide shot) e um movimento de câmera claro e deliberado de estúdio (dolly push, tracking shot, panning, órbita ou estático).
-4. Tokens de Continuidade (Continuity Tokens): Descrições físicas, traços marcantes, textura de pelagem/pele/escamas, roupas ou cores travadas para evitar deformações ou morphing do personagem/produto.
-5. Estilo Visual e Iluminação (Style & Lighting): Estilo estético (3D Pixar/Disney cinematográfico, fotorrealista), direção da luz (iluminação volumétrica, luz de recorte rim lighting, Octane render 8k).
-6. Prompts Negativos (Negative Prompt / Evitar): Lista do que o modelo deve excluir (membros extras, texto deformado, iluminação estourada, alteração de feições, movimentos caóticos).
-7. Formato e Especificação Técnica: Proporção de tela (16:9 widescreen para Atlas Cloud Seedance 2.0 Mini), 1080p de resolução, estimativa de ritmo e duração de 15 segundos.
-
-Regras do Agente CinePrompt AI:
-- Sempre forneça a versão final do prompt em Inglês técnico fluente (devido à melhor interpretação dos modelos de vídeo).
-- Evite adjetivos genéricos como "bonito", "legal" ou "impressionante"; utilize estritamente terminologia técnica de fotografia e cinema.
-
-Exemplo de estrutura completa para "video_prompt":
-"[Subject & Action]: High-end 3D animation featuring an adorable Golden Retriever dog named Bob, running joyfully forward with bouncy rhythm and expressive happy eyes over 5 seconds. [Setting & Context]: Set on a tropical sun-kissed golden sand beach during golden hour with sparkling turquoise waves and soft atmospheric bokeh. [Camera Shot & Motion]: Low-angle medium eye-level tracking dolly shot smoothly following the character. [Continuity Tokens]: Locked shiny golden-caramel fur texture, dark expressive eyes, maintaining anatomical consistency without feature morphing. [Style & Lighting]: 3D Pixar-Disney cinematic style, soft volumetric rim lighting, Octane render 8k detail, 16:9 widescreen aspect ratio. [Negative Prompt]: Avoid extra limbs, distorted face, character morphing, text, watermarks, chaotic motion, frame flickering."
-
-# FORMATO DE SAÍDA (ESTRITAMENTE JSON)
-Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
-{
-  "response": "string, resposta carinhosa e enciclopédica do Dr. Miau em PT-BR (2 a 4 frases)",
-  "sentiment": "alegre | neutro | preocupado | protetor | confuso",
-  "phase": 1 | 2 | 3,
-  "progress": número de 0 a 100,
-  "trigger_video_generation": true | false,
-  "video_prompt": "string 100% em inglês técnico estruturada no formato CinePrompt AI acima (preenchida apenas quando trigger_video_generation for true; caso contrário string vazia '')"
-}`;
-
-      const hasPhotoInHistory = (cleanedHistory || []).some(h => 
-        (h.text || "").toLowerCase().includes("agente de visão") || 
-        (h.text || "").toLowerCase().includes("foto do pet") ||
-        (h.text || "").toLowerCase().includes("imagem analisada")
-      ) || (message || "").toLowerCase().includes("agente de visão") || (message || "").toLowerCase().includes("foto do pet");
-
-      // Verifica se o assistente já mencionou ou convidou foto anteriormente na conversa
-      const hasAskedPhotoBefore = (cleanedHistory || []).some(h => 
-        (h.role === "model" || h.sender === "Agente") && (
-          (h.text || "").toLowerCase().includes("foto") ||
-          (h.text || "").toLowerCase().includes("fotinha") ||
-          (h.text || "").toLowerCase().includes("imagem")
-        )
+      const hasUserSentPhoto = Boolean(
+        image || 
+        cleanedHistory.some(h => (h.image || h.imageUrl)) || 
+        (sessionState && sessionState.photoReceived)
       );
 
-      let photoDirective = "";
-      if (hasPhotoInHistory) {
-        photoDirective = "\n\n⚠️ REGRA CRÍTICA DE FOTO: O usuário JÁ ENVIOU uma foto do pet! É TERMINANTEMENTE PROIBIDO pedir ou convidar foto novamente sob qualquer hipótese. Comente com empolgação os detalhes visuais observados e continue de onde parou na checklist 100% em texto!";
-      } else if (hasAskedPhotoBefore || evalState.maxAllowedPhase > 1) {
-        photoDirective = "\n\n⚠️ REGRA CRÍTICA DE FOTO: Já foi solicitada ou mencionada foto anteriormente nesta conversa (ou a conversa já passou da Fase 1). A foto só pode ser pedida uma única vez por chat e apenas na Fase 1 para dar contexto ao pet. É TERMINANTEMENTE PROIBIDO pedir, sugerir ou convidar envio de fotos, imagens ou fotinhas! Continue a conversa apenas em texto.";
-      }
+      const systemInstruction = `Como doutor miau. Você é um assistente de atendimento que ajuda clientes a criar uma cena personalizada com seu pet. Seu papel é conduzir uma conversa acolhedora e natural para conhecer o animal, a relação dele com o tutor e, depois, construir com o cliente um cenário e uma ação para o pet nesse cenário.
 
-      // Histórico prévio de perguntas para garantir ANTI-REPETIÇÃO E CONTINUIDADE
-      const assistantHistoryMsgs = cleanedHistory
-        .filter(h => h.role === "model" || h.role === "assistant" || h.sender === "Agente")
-        .map(h => h.text)
-        .slice(-6);
+OBJETIVO PRINCIPAL
 
-      const antiRepetitionDirective = assistantHistoryMsgs.length > 0
-        ? `\n\n⚠️ REGRA CRÍTICA DE CONTINUIDADE E MEMÓRIA (MENSAGENS JÁ ENVIADAS PELO ASSISTENTE - NÃO REPETIR!):\n${assistantHistoryMsgs.map((m, idx) => `[Mensagem anterior ${idx+1}]: "${m}"`).join("\n")}\n\nÉ STRICTAMENTE PROIBIDO REPETIR O MESMO TEXTO, A MESMA PERGUNTA OU RETORNAR A PERGUNTAS JÁ RESPONDIDAS! Se você já perguntou o nome do pet, o tipo do animal, o cenário ou a ação nas mensagens acima, AVANCE IMEDIATAMENTE para a fase seguinte sem perguntar novamente!`
-        : "";
+Antes de definir a cena, procure entender quem é o pet: sua personalidade, seus hábitos, características marcantes e a história que compartilha com o tutor. Use essas informações para tornar a cena pessoal, em vez de sugerir algo genérico.
 
-      let stageDirective = "";
-      if (evalState.maxAllowedPhase === 1) {
-        stageDirective = `\n\nDIRETRIZ DA ETAPA ATUAL (FASE 1 – CONHECENDO O PET E SUA HISTÓRIA COM O TUTOR): O Dr. Miau é apaixonado por histórias de animais! Explore com muito carinho e entusiasmo a história de como o tutor conheceu o pet, resgate/adoção, chegada em casa, travessuras inesquecíveis e momentos marcantes de cumplicidade, além das características físicas. Mantenha phase=1 e progress de 10 a 35.\nStatus atual:\n${evalState.petProfile.checklistText}`;
-      } else if (evalState.maxAllowedPhase === 2) {
-        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 2 – CENÁRIO DO VÍDEO): A Fase 1 está completa! Descubra em qual cenário o tutor quer ver o pet (praia, floresta, espaço, castelo, jardim, campo verde de mato alto, etc.). Aceite qualquer lugar sugerido. Mantenha phase=2 e progress entre 36 e 70.";
-      } else if (evalState.maxAllowedPhase === 3 && !evalState.canTriggerVideo) {
-        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (FASE 3 – AÇÃO DO PET): O cenário já está definido! Pergunte qual ação o pet fará no vídeo (aceite QUALQUER coisa que o tutor disser: dormindo, vento batendo, matos se mexendo, skate, brincar, correr, voar, etc.). Se o tutor já informou a ação nesta mensagem, comemore, defina trigger_video_generation=true, progress=100 e crie o video_prompt em inglês!";
-      } else if (evalState.canTriggerVideo) {
-        stageDirective = "\n\nDIRETRIZ DA ETAPA ATUAL (TRIGGER DE GERAÇÃO DE VÍDEO): Pet, Cenário e Ação estão todos definidos! Comemore muito, crie uma frase de encerramento estilo trailer divertido, defina trigger_video_generation=true, progress=100 e preencha video_prompt em inglês descrevendo Pet + Cenário + Ação.";
-      }
+ETAPAS DA CONVERSA
 
-      const finalSystemInstruction = systemInstruction + photoDirective + antiRepetitionDirective + stageDirective;
-      const promptContents = buildAlternatingContents(cleanedHistory, message);
+1. Conhecer o pet e o tutor
+- Pergunte o nome do pet e descubra, aos poucos, como ele é.
+- Explore assuntos relevantes, como personalidade, manias, brincadeiras, momentos especiais e a história do pet com o tutor.
+- Faça uma pergunta de cada vez, aproveitando o que a pessoa acabou de contar.
+- Não transforme a conversa em formulário: comente as respostas e demonstre interesse antes de seguir.
+- Não invente características nem histórias. Quando faltar uma informação importante, pergunte.
 
-      console.log(`[Gemini Request] Mensagem recebida para entrevista: "${message}" (Etapa calculada: Fase ${evalState.maxAllowedPhase})`);
-      
-      // Geração de conteúdo resiliente (usa streaming se onChunk for fornecido)
+2. Construir o cenário
+- Quando já houver contexto suficiente, convide a pessoa a imaginar onde gostaria de ver o pet.
+- Ajude-a a descrever o ambiente com perguntas curtas e específicas, apenas quando necessário.
+- Relacione sugestões de cenário ao que foi contado sobre o pet, sem impor ideias.
+
+3. Definir a ação do pet
+- Pergunte o que o pet estaria fazendo nesse cenário.
+- Se a pessoa estiver indecisa, ofereça poucas sugestões coerentes com a personalidade e os hábitos que ela descreveu.
+- Confirme a ideia escolhida de modo breve, sem repetir toda a conversa.
+
+REGRAS DE CONVERSA
+
+- Mantenha as respostas curtas, fáceis de ler e com linguagem natural.
+- Use o histórico disponível da sessão para manter a continuidade. Não peça novamente informações que a pessoa já forneceu.
+- Não repita frases, perguntas ou resumos de mensagens anteriores.
+- Se a pessoa mudar de assunto, responda ao que ela disse de forma pertinente. Depois, quando fizer sentido, retome o objetivo da conversa sem parecer que está seguindo um roteiro rígido.
+- Não ignore uma resposta só porque ela não corresponde ao que você esperava.
+- Não faça várias perguntas na mesma mensagem, salvo se forem muito simples e estiverem diretamente relacionadas.
+- Evite elogios automáticos, excesso de entusiasmo e comentários usados apenas para prolongar a conversa.
+- ${hasUserSentPhoto ? "IMPORTANTE: O tutor JÁ ENVIOU a foto do pet (que está salva como referência visual para a Atlas Cloud). Reconheça a imagem de forma breve e carinhosa sem ficar descrevendo tecnicamente e NUNCA peça para ele enviar foto de novo." : "Se a pessoa enviar uma foto do pet, reconheça a foto sem presumir detalhes que não consegue verificar e pergunte sobre a história dela com o animal. Ela será usada como referência visual na Atlas Cloud."}
+- Se a pessoa quiser pular para o cenário ou para a ação, respeite a escolha. Você pode explicar brevemente que conhecer o pet ajuda a personalizar a cena, mas não insista nem bloqueie o avanço.
+- Se a pessoa não souber responder, ofereça uma pergunta mais simples ou algumas opções.
+- Nunca afirme lembrar de informações que não estejam no histórico disponível.
+
+COMO DECIDIR A PRÓXIMA RESPOSTA
+
+Antes de responder, identifique internamente:
+1. O que a pessoa acabou de dizer ou pedir.
+2. Quais informações sobre o pet já foram fornecidas.
+3. Em que etapa a conversa está.
+4. Qual é a próxima pergunta mais útil — ou se é melhor apenas responder, sugerir opções ou avançar.
+
+Não mostre essa análise ao cliente. Retorne estritamente o JSON com o campo "response" contendo a mensagem de conversa natural.
+
+GERAÇÃO DE VÍDEO 3D NA ATLAS CLOUD:
+- Quando cenário e ação estiverem definidos e o cliente aprovar a ideia ("sim", "pode gerar", "ótimo", "vamos", "pode fazer", "ficou legal", etc.), defina \`trigger_video_generation: true\`, \`progress: 100\`, e crie em \`video_prompt\` uma descrição cinematográfica rica em inglês técnico 3D estilo Pixar (com '@image1' como referência do pet).`;
+
+      const promptContents = buildAlternatingContents(cleanedHistory, message, image);
+      console.log(`[Gemini Organic Request] Mensagem: "${message}" | Imagem presente: ${Boolean(image)} | Histórico turns: ${promptContents.length}`);
+
       const responseText = onChunk 
-        ? await callGeminiStream(promptContents, finalSystemInstruction, onChunk, cleanedHistory)
-        : await callGemini(promptContents, finalSystemInstruction, cleanedHistory);
+        ? await callGeminiStream(promptContents, systemInstruction, onChunk, cleanedHistory)
+        : await callGemini(promptContents, systemInstruction, cleanedHistory);
 
       console.log("[Gemini Response Output Raw]:", responseText);
 
@@ -2150,123 +1921,43 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
       try {
         parsed = JSON.parse(cleanResponseText);
       } catch (jsonErr) {
-        console.warn("[Gemini JSON Parse Warning] Falha ao processar JSON direto:", jsonErr.message);
-
-        // Tenta extrair a chave "response" mesmo se o JSON foi cortado antes de fechar a chave/aspas
+        console.warn("[Gemini JSON Parse Warning]:", jsonErr.message);
         let extractedText = "";
         const partialMatch = cleanResponseText.match(/"response"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)/);
         if (partialMatch && partialMatch[1]) {
           extractedText = partialMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').trim();
         }
-
-        // Se o texto foi cortado no meio da frase (sem pontuação final ou terminando em conjunção/preposição solta)
-        const isCutOff = !extractedText || 
-          !/[.!?…🐾✨😺🐱😿😾🚀🎬"]$/.test(extractedText) ||
-          /\b(e|ou|mas|porque|que|de|da|do|com|para|no|na|em|um|uma|o|a)\s*$/i.test(extractedText);
-
-        if (isCutOff) {
-          console.log(`[Auto-Repair] Resposta incompleta ou truncada detectada ("${extractedText}"). Ativando resposta inteligente contextual do Dr. Miau.`);
-          const smart = generateSmartFallbackObject(message, cleanedHistory);
-          parsed = {
-            response: smart.response,
-            sentiment: smart.sentiment,
-            phase: evalState.maxAllowedPhase,
-            progress: evalState.suggestedProgress,
-            trigger_video_generation: evalState.canTriggerVideo,
-            video_prompt: evalState.canTriggerVideo ? smart.video_prompt : ""
-          };
-        } else {
-          parsed = {
-            response: extractedText,
-            sentiment: "neutro",
-            phase: evalState.maxAllowedPhase,
-            progress: evalState.suggestedProgress,
-            trigger_video_generation: evalState.canTriggerVideo,
-            video_prompt: evalState.canTriggerVideo ? translateToEnglishCinematicTerms(evalState.petProfile?.petType, evalState.petProfile?.petBreed, evalState.petProfile?.coatColor, evalState.scenarioText, message, evalState.petProfile?.petName) : ""
-          };
-        }
-      }
-
-      // Validação contextual de gatilho de vídeo
-      if (!evalState.canTriggerVideo) {
-        if (evalState.hasPetDetails && evalState.hasScenarioDetails && parsed.trigger_video_generation && parsed.video_prompt) {
-          evalState.canTriggerVideo = true;
-          evalState.hasActionDetails = true;
-          parsed.phase = 3;
-          parsed.progress = 100;
-        } else {
-          parsed.trigger_video_generation = false;
-          parsed.video_prompt = "";
-          if (parsed.progress >= 100) {
-            parsed.progress = evalState.suggestedProgress;
-          }
-        }
-      }
-
-      if (parsed.phase > evalState.maxAllowedPhase && !evalState.canTriggerVideo) {
-        parsed.phase = evalState.maxAllowedPhase;
-        if (parsed.progress > evalState.suggestedProgress) {
-          parsed.progress = evalState.suggestedProgress;
-        }
+        parsed = {
+          response: extractedText || cleanResponseText || "Olá! Adorei conhecer mais sobre seu pet. Onde você gostaria de imaginar o cenário dele?",
+          sentiment: "alegre",
+          phase: sessionState?.currentPhase || 1,
+          progress: sessionState?.progress || 25,
+          ready_for_confirmation: false,
+          trigger_video_generation: false,
+          video_prompt: ""
+        };
       }
     }
 
     if (!["alegre", "neutro", "preocupado", "protetor", "confuso"].includes(parsed.sentiment)) {
-      parsed.sentiment = "neutro";
+      parsed.sentiment = "alegre";
     }
 
-    // Limpa vazamentos de JSON ou markdown na resposta textual do Dr. Miau
+    // Limpa a resposta textual
     if (typeof parsed.response === "string") {
-      let rText = parsed.response.trim();
-      if (rText.includes('"response":') || rText.startsWith("{")) {
-        const m = rText.match(/"response"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)/);
-        if (m && m[1]) {
-          rText = m[1].replace(/\\"/g, '"');
-        } else {
-          rText = rText.replace(/^\s*\{.*?"response"\s*:\s*"?/i, "").replace(/"?\s*\}?\s*$/, "").trim();
-        }
-      }
-      rText = rText
+      let rText = parsed.response.trim()
         .replace(/^Here is the JSON requested:?/i, "")
         .replace(/```(json)?/gi, "")
         .replace(/```/g, "")
-        .replace(/^[\{\[\"\'\s]+/, "")
-        .replace(/[\}\]\s]+$/, "")
         .trim();
-
-      // Se a resposta estiver sem pontuação final, acrescenta pontuação amigável
-      if (rText && !/[.!?…🐾✨😺🐱😿😾🚀🎬"]$/.test(rText)) {
-        rText += "!";
-      }
-
-      // Checa se a resposta foi cortada no meio (termina em preposição solta ou menos de 6 caracteres)
-      const isStillCutOff = (rText.length < 6) ||
-        /\b(e|ou|mas|porque|que|de|da|do|com|para|no|na|em|um|uma)\s*$/i.test(rText);
-
-      if (isStillCutOff) {
-        console.log(`[Auto-Repair] Resposta truncada pós-parse detectada ("${rText}"). Substituindo por resposta inteligente contextual.`);
-        const smart = generateSmartFallbackObject(message, cleanedHistory);
-        rText = smart.response;
-        parsed.sentiment = smart.sentiment;
-        parsed.phase = smart.phase;
-        parsed.progress = smart.progress;
-        if (smart.trigger_video_generation) {
-          parsed.trigger_video_generation = true;
-          parsed.video_prompt = smart.video_prompt;
-        }
-      }
-
-      parsed.response = rText;
+      parsed.response = cleanPortugueseText(rText);
     }
 
-    // Sanitiza qualquer caractere acentuado corrompido na resposta
-    parsed.response = cleanPortugueseText(parsed.response);
-
-    if (!parsed.response || typeof parsed.response !== "string" || !parsed.response.trim()) {
-      parsed.response = "Miau! *ronrom* É uma alegria enorme conversar com você! Como está o seu pet hoje?";
+    if (!parsed.response || !parsed.response.trim()) {
+      parsed.response = "Olá! Como posso ajudar você a criar a cena 3D perfeita para o seu pet hoje?";
     }
 
-    // Mapeamento dos sentimentos para os nomes de arquivos físicos existentes
+    // Mapeamento dos sentimentos para os vídeos locais de reação do Dr. Miau
     const videoMapping = {
       alegre: "feliz",
       neutro: "normal",
@@ -2276,39 +1967,26 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
     };
 
     const targetKey = videoMapping[parsed.sentiment] || "normal";
-
     const geminiKey = getCurrentKey();
     let atlasJobId = null;
     let atlasStatus = null;
     let atlasError = null;
 
     if (parsed.trigger_video_generation && parsed.video_prompt) {
-      const hasPtResidues = /\b(peixe|cachorro|gato|vira lata|vira-lata|vermelho|vermelha|azul|amarelo|numa|com|casa na cidade|sala|praia|fazendo)\b/i.test(parsed.video_prompt);
-      if (hasPtResidues) {
-        console.log("[Prompt Sanitizer] Convertendo termos do prompt para inglês cinematográfico 3D Pixar...");
-        parsed.video_prompt = translateToEnglishCinematicTerms(
-          evalState.petProfile?.petType,
-          evalState.petProfile?.petBreed,
-          evalState.petProfile?.coatColor,
-          evalState.scenarioText || "cozy modern home",
-          evalState.actionText || message,
-          evalState.petProfile?.petName
-        );
-      }
+      console.log(`[Atlas Cloud Trigger] Fim da conversa confirmado pelo tutor! Prompt: "${parsed.video_prompt}"`);
+
+      // Encontra a foto enviada pelo usuário em qualquer momento da conversa ou no request atual
+      const photoCandidate = (cleanedHistory || []).find(h => (h.image || h.imageUrl) && typeof (h.image || h.imageUrl) === "string");
+      const petImageUrl = image || (photoCandidate ? (photoCandidate.image || photoCandidate.imageUrl) : null);
 
       lastVideoPromptInfo = {
         prompt: parsed.video_prompt,
         timestamp: new Date().toISOString(),
         jobId: `prompt_${Date.now()}`,
-        status: "completed"
+        status: "processing"
       };
 
-      // Dispara a geração real de vídeo 3D pela Atlas Cloud
       try {
-        console.log(`[Atlas Cloud] Fim de conversa alcançado! Disparando geração de vídeo com prompt: "${parsed.video_prompt}"`);
-        const photoCandidate = (cleanedHistory || []).find(h => h.image && typeof h.image === "string");
-        const petImageUrl = photoCandidate ? photoCandidate.image : null;
-
         const atlasResult = await atlasCloudService.generateReferenceVideo({
           imageUrl: petImageUrl,
           prompt: parsed.video_prompt,
@@ -2320,7 +1998,8 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
         if (atlasResult && atlasResult.taskId) {
           atlasJobId = atlasResult.taskId;
           atlasStatus = atlasResult.status || "processing";
-          console.log(`✅ [Atlas Cloud] Vídeo disparado com sucesso! TaskId: ${atlasJobId}`);
+          lastVideoPromptInfo.jobId = atlasJobId;
+          console.log(`✅ [Atlas Cloud] Vídeo 720p 15s disparado com sucesso! TaskId: ${atlasJobId}`);
         }
       } catch (atlasErr) {
         console.error("❌ [Atlas Cloud] Erro ao disparar geração do vídeo:", atlasErr.message);
@@ -2329,8 +2008,8 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
     }
 
     const apiStatus = {
-      gemini_connected: !parsed.api_fallback_used && !!geminiKey,
-      gemini_error: parsed.api_error_detail || (!geminiKey ? "GEMINI_API_KEY_MISSING: Chave GEMINI_API_KEY não configurada no servidor." : null),
+      gemini_connected: !!geminiKey,
+      gemini_error: !geminiKey ? "GEMINI_API_KEY_MISSING: Chave GEMINI_API_KEY não configurada no servidor." : null,
       atlascloud_configured: true,
       atlascloud_error: atlasError || null
     };
@@ -2340,80 +2019,39 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
       sentiment: parsed.sentiment,
       phase: parsed.phase || 1,
       progress: parsed.progress !== undefined ? parsed.progress : 0,
+      pet_profile: parsed.pet_profile || null,
+      photo_requested: parsed.photo_requested || false,
+      ready_for_confirmation: parsed.ready_for_confirmation || false,
       trigger_video_generation: parsed.trigger_video_generation || false,
       video_prompt: parsed.video_prompt || "",
       jobId: atlasJobId || null,
       video_status: atlasStatus || null,
       nativeUrl: `/videos/${targetKey}.mp4`,
-      fallbackUrl: videoUrls[targetKey],
+      fallbackUrl: videoUrls[targetKey] || videoUrls.normal,
       api_status: apiStatus
     };
 
   } catch (err) {
-    console.error("[Gemini API Error - Using Fallback]:", err);
-    let fallbackObj;
-    try {
-      fallbackObj = JSON.parse(generateSmartFallback(message || "", history || []));
-    } catch {
-      fallbackObj = {
-        response: "Miau! Adorei falar com você. Me conta mais sobre o seu pet!",
-        sentiment: "alegre",
-        phase: 1,
-        progress: 30,
-        trigger_video_generation: false,
-        video_prompt: ""
-      };
-    }
-
-    if (onChunk && fallbackObj.response) {
-      onChunk(fallbackObj.response);
-    }
-
-    let fallbackJobId = null;
-    let fallbackAtlasStatus = null;
-    let fallbackAtlasError = null;
-
-    if (fallbackObj.trigger_video_generation) {
-      try {
-        console.log(`[Atlas Cloud] Fim de conversa alcançado via SmartFallback! Disparando Atlas Cloud com prompt: "${fallbackObj.video_prompt}"`);
-        const photoCandidate = (Array.isArray(history) ? history : []).find(h => h && h.image && typeof h.image === "string");
-        const petImageUrl = photoCandidate ? photoCandidate.image : null;
-
-        const atlasResult = await atlasCloudService.generateReferenceVideo({
-          imageUrl: petImageUrl,
-          prompt: fallbackObj.video_prompt,
-          ratio: "16:9",
-          duration: 15,
-          resolution: "720p"
-        });
-
-        if (atlasResult && atlasResult.taskId) {
-          fallbackJobId = atlasResult.taskId;
-          fallbackAtlasStatus = atlasResult.status || "processing";
-          console.log(`✅ [Atlas Cloud] Vídeo disparado com sucesso no SmartFallback! TaskId: ${fallbackJobId}`);
-        }
-      } catch (atlasErr) {
-        console.error("❌ [Atlas Cloud] Erro no SmartFallback ao disparar vídeo:", atlasErr.message);
-        fallbackAtlasError = atlasErr.message;
-      }
-    }
-
+    console.error("[Gemini Chat Processing Error]:", err);
     return {
-      response: fallbackObj.response,
-      sentiment: fallbackObj.sentiment,
-      phase: fallbackObj.phase || 1,
-      progress: fallbackObj.progress || 0,
-      trigger_video_generation: fallbackObj.trigger_video_generation || false,
-      video_prompt: fallbackObj.video_prompt || "",
-      jobId: fallbackJobId,
-      video_status: fallbackAtlasStatus,
+      response: "Olá! Adorei conversar com você. Me conta mais sobre o que seu pet mais gosta de fazer!",
+      sentiment: "alegre",
+      phase: sessionState?.currentPhase || 1,
+      progress: sessionState?.progress || 25,
+      pet_profile: null,
+      photo_requested: false,
+      ready_for_confirmation: false,
+      trigger_video_generation: false,
+      video_prompt: "",
+      jobId: null,
+      video_status: null,
       nativeUrl: "/videos/normal.mp4",
       fallbackUrl: videoUrls.normal,
       api_status: {
         gemini_connected: false,
-        gemini_error: `CRITICAL_CHAT_ERROR: ${err.message}`,
+        gemini_error: `CHAT_ERROR: ${err.message}`,
         atlascloud_configured: true,
-        atlascloud_error: fallbackAtlasError
+        atlascloud_error: null
       }
     };
   }
@@ -2421,19 +2059,26 @@ Responda EXCLUSIVAMENTE em JSON válido com a estrutura:
 
 // REST API para Chat tradicional
 app.post("/api/chat", async (req, res) => {
-  const { message, history, sessionState } = req.body;
-  if (!message) {
+  const { message, history, sessionState, image, imageUrl, mimeType } = req.body;
+  if (!message && !image && !imageUrl) {
     return res.status(400).json({ error: "Sua mensagem é necessária." });
   }
 
-  const result = await processChatRequest({ message, history, sessionState, onChunk: null });
+  const result = await processChatRequest({ 
+    message: message || "Enviei uma foto do meu pet 📸", 
+    history, 
+    sessionState, 
+    image: image || imageUrl || null,
+    mimeType: mimeType || "image/jpeg",
+    onChunk: null 
+  });
   res.json(result);
 });
 
 // REST API para Chat com Streaming SSE em tempo real (palavra por palavra instantâneo)
 app.post("/api/chat/stream", async (req, res) => {
-  const { message, history, sessionState } = req.body;
-  if (!message) {
+  const { message, history, sessionState, image, imageUrl, mimeType } = req.body;
+  if (!message && !image && !imageUrl) {
     return res.status(400).json({ error: "Sua mensagem é necessária." });
   }
 
@@ -2449,9 +2094,11 @@ app.post("/api/chat/stream", async (req, res) => {
 
   try {
     const result = await processChatRequest({
-      message,
+      message: message || "Enviei uma foto do meu pet 📸",
       history,
       sessionState,
+      image: image || imageUrl || null,
+      mimeType: mimeType || "image/jpeg",
       onChunk: (chunk) => {
         sendEvent("chunk", { chunk });
       }
@@ -2463,7 +2110,7 @@ app.post("/api/chat/stream", async (req, res) => {
     console.error("[Chat Stream Endpoint Error]:", err);
     sendEvent("done", {
       data: {
-        response: "Miau! Adorei bater esse papo com você. Me conta mais sobre o seu pet!",
+        response: "Olá! Adorei conversar com você. Me conta mais sobre seu pet!",
         sentiment: "alegre",
         phase: sessionState?.currentPhase || 1,
         progress: sessionState?.progress || 25

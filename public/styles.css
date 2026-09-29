@@ -672,13 +672,17 @@ img, video, canvas {
 /* ── Painel de ajuda ── */
 .help {
   position: fixed; top: 70px; left: clamp(14px, 5vw, 36px);
-  z-index: 45; width: min(320px, 86vw);
-  display: grid; grid-template-rows: auto minmax(0,1fr);
-  gap: 12px; padding: 14px;
+  z-index: 45; width: min(360px, 90vw);
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 14px; padding: 16px;
   border: 1px solid var(--line-strong); border-radius: 16px;
-  background: rgba(13,21,24,0.96);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.36);
+  background: rgba(13,21,24,0.97);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
   animation: panel-in 160ms var(--ease);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .nav-logo {
@@ -693,25 +697,70 @@ img, video, canvas {
   display: flex; align-items: center;
   justify-content: space-between; gap: 12px;
 }
-.help__header h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.help__header h2 { margin: 0; font-size: 14px; font-weight: 600; color: #ffffff; }
 
 .help__close {
-  width: 32px; height: 32px;
+  width: 30px; height: 30px;
   display: inline-grid; place-items: center;
   border-radius: var(--radius-control);
   color: var(--ink-soft); background: rgba(255,255,255,0.08);
   border: 0; cursor: pointer;
+  transition: all 160ms ease;
+}
+.help__close:hover {
+  background: rgba(255,255,255,0.15);
+  color: #ffffff;
 }
 .help__close svg {
-  width: 18px; height: 18px;
+  width: 16px; height: 16px;
   fill: none; stroke: currentColor; stroke-width: 2;
   stroke-linecap: round; stroke-linejoin: round;
 }
 
 .help__list {
   margin: 0; padding-left: 18px;
-  display: grid; gap: 8px;
-  color: var(--ink-soft); font-size: 12px; line-height: 1.4;
+  display: grid; gap: 7px;
+  color: var(--ink-soft); font-size: 12px; line-height: 1.45;
+}
+
+/* ── Seção de Dicas Rápidas (Atlas Cloud 3D) ── */
+.help__tips-section {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(239, 181, 119, 0.1) 0%, rgba(16, 185, 129, 0.08) 100%);
+  border: 1px solid rgba(239, 181, 119, 0.25);
+}
+
+.help__tips-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--peach, #efb577);
+  margin-bottom: 8px;
+}
+
+.help__tips-icon {
+  width: 15px;
+  height: 15px;
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.help__tips-list {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.help__tips-list strong {
+  color: #ffffff;
 }
 
 /* ── Hover / estados interativos ── */
@@ -3184,6 +3233,49 @@ body[data-theme-color="purple"] {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ── Interactive Quick Confirmation Button (Phase 4) ── */
+.quick-confirm-box {
+  margin: 12px 0 16px 0;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  animation: fadeInQuickConfirm 300ms ease-out forwards;
+}
+
+@keyframes fadeInQuickConfirm {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.quick-confirm-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-family: var(--font, system-ui);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(16, 185, 129, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.quick-confirm-btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  box-shadow: 0 6px 24px rgba(16, 185, 129, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+
+.quick-confirm-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
 
 
 
