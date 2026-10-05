@@ -1,3 +1,38 @@
+/**
+ * ============================================================================
+ * DR. MIAU PET AGENT - ESTILOS CENTRAIS DA APLICAÇÃO (CSS CENTRALIZADO)
+ * ============================================================================
+ * SUMÁRIO / MAPA DAS SEÇÕES:
+ * 
+ * 1. VARIÁVEIS CSS E DESIGN TOKENS (:root)
+ *    - Paleta de Cores (Dark, Peach, Emerald, Purple, etc.)
+ *    - Sombras, Bordas, Tipografia e Curvas de Transição
+ * 2. RESETS E BLOQUEIO DE VIEWPORT
+ *    - Normalização de Box Model, Body e Proteção contra Zoom Mobile
+ * 3. LAYOUT PRINCIPAL (STAGE E PALCO DO AVATAR)
+ *    - Container .stage, .agent-stage e .agent-wrap
+ *    - Dual-buffer de Vídeo sem Cintilação (#magic-hour-video-a / video-b)
+ * 4. BALÃO DE FALA E INDICADORES DE FALA/PENSAMENTO
+ *    - .agent-bubble, .typing-dots e .thinking-indicator
+ * 5. COMPOSER (BARRA DE DIGITAÇÃO E ENTRADA)
+ *    - Input de Mensagens, Botão de Envio e Alternador de Áudio/Texto
+ *    - Bandeja de Pré-visualização de Imagem (#imagePreviewContainer)
+ * 6. CHAT E MINI-HISTÓRICO FLUTUANTE
+ *    - .mini-history, .mini-item (me vs agent)
+ *    - Card Interativo de Convite de Foto (.chat-photo-prompt-card)
+ *    - Botão de Confirmação Rápida (.quick-confirm-box)
+ * 7. BARRA DE PROGRESSO E BANNER DE STATUS ATLAS CLOUD 3D
+ *    - .progress-bar, #videoProgressBanner, #videoProgressBarFill
+ * 8. MODAIS E DIÁLOGOS DE SISTEMA
+ *    - Galeria de Vídeos (.gallery-modal, .gallery-card)
+ *    - Modal de Perfil e Troca de Usuário (.profile-dropdown)
+ *    - Modal do Prompt Final e Diagnóstico de Conexão das APIs
+ * 9. RESPONSIVIDADE E ADAPTAÇÃO MOBILE/DESKTOP (@media queries)
+ *    - Modo Lado a Lado (.layout-side-by-side)
+ *    - Ajustes para Telas Pequenas e Orientação Retrato
+ * ============================================================================
+ */
+
 :root {
   color-scheme: dark;
   --page:              #121d21;

@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de implementação para fluxo de solicitação de foto do pet (com convite inicial em chat, popup interativo com opção de envio ou recusa) e eliminação completa de imagens pré-fabricadas na Atlas Cloud, utilizando 100% a descrição real e a foto do tutor.",
-  "updatedAt":  "2026-09-29T14:04:48.866203259Z",
+  "summary":  "Plano de Refatoração Arquitetural Completo: modularização do backend Express em padrão MVC (routes, controllers, services, config), reorganização do front-end em módulos ES6 por componentes/serviços e consolidação de CSS centralizado e documentado, com 100% de preservação funcional e sem quebra de compatibilidade.",
+  "updatedAt":  "2026-10-05T20:57:42.282974927Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

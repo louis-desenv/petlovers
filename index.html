@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Remix agentpet mumu</title>
-  <meta name="description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets ElevenLabs (Seedance 2.5)." />
-  <meta property="og:title" content="Pet Agent Dr. Miau - Animações 3D com ElevenLabs Seedance 2.5" />
-  <meta property="og:description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets ElevenLabs (Seedance 2.5)." />
+  <meta name="description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets Atlas Cloud." />
+  <meta property="og:title" content="Pet Agent Dr. Miau - Animações 3D com Atlas Cloud" />
+  <meta property="og:description" content="Agente interativo Dr. Miau com inteligência artificial Gemini e estúdio de animação de pets Atlas Cloud." />
   <script>
     // Polyfill defensivo: permite que scripts de telemetria ou extensões atribuam window.fetch com segurança
     try {
@@ -104,7 +104,7 @@
           <div class="agent-wrap" data-ui="agentWrap" id="agentWrap">
             <!-- Balão de fala -->
             <div class="agent-bubble" role="status" aria-live="polite" aria-label="Fala do Dr. Miau">
-              <p data-ui="bubbleText">Olá! Sou o Dr. Miau! 🐾 Que alegria falar com você! Fique à vontade para bater um papo!</p>
+              <p data-ui="bubbleText">Olá! Sou o Dr. Miau. Estou aqui para ajudar você a criar uma cena 3D personalizada com o seu pet. Para começarmos, qual é o nome do seu companheiro e que tipo de animalzinho ele é? 🐾</p>
             </div>
 
             <img
@@ -302,7 +302,7 @@
     <div class="video-progress-banner__content">
       <div class="video-progress-banner__icon">
         <span class="video-progress-banner__spinner"></span>
-        <span class="video-progress-banner__badge">16:9 • 1080p • 15s</span>
+        <span class="video-progress-banner__badge">16:9 • 720p • 15s</span>
       </div>
       <div class="video-progress-banner__info">
         <div class="video-progress-banner__title">
@@ -417,12 +417,23 @@
       </button>
     </div>
     <ul class="help__list">
-      <li>Digite no campo de texto e envie para conversar com o Dr. Miau.</li>
-      <li>Use o modo <strong>Voz</strong> para falar diretamente com o microfone.</li>
-      <li>O Dr. Miau interpreta seus sentimentos em tempo real e muda suas expressões faciais instantaneamente!</li>
-      <li>Você verá reações alegres, neutras, preocupadas ou protetoras conforme o assunto da conversa.</li>
-      <li>O Dr. Miau não faz diagnósticos médicos. Para sintomas graves, consulte um veterinário.</li>
+      <li>Digite no campo de texto ou fale pelo microfone para conversar naturalmente com o Dr. Miau.</li>
+      <li>O Dr. Miau interpreta seus sentimentos em tempo real e reage com expressões felinas animadas!</li>
+      <li>A conversa percorre 3 etapas: <strong>1) O Pet & História</strong>, <strong>2) O Cenário dos Sonhos</strong> e <strong>3) A Ação na Cena</strong>, finalizando com a animação 3D.</li>
     </ul>
+
+    <!-- Seção de Dicas Rápidas (Atlas Cloud 3D) -->
+    <div class="help__tips-section">
+      <div class="help__tips-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="help__tips-icon"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Dicas Rápidas (Atlas Cloud 3D)</span>
+      </div>
+      <ul class="help__tips-list">
+        <li><strong>Fotos em Cenários Inusitados:</strong> Envie fotos do seu pet em poses expressivas, roupinhas, ângulos divertidos ou ambientes inusitados. A IA da Atlas Cloud utiliza a imagem como referência física direta para criar um vídeo 3D surpreendente!</li>
+        <li><strong>Iluminação & Foco:</strong> Fotos nítidas e bem iluminadas destacam a textura da pelagem/escamas/penas e o brilho dos olhos na renderização final.</li>
+        <li><strong>Criatividade Total:</strong> Você pode imaginar seu pet em qualquer lugar (no espaço, na praia, numa floresta mágica) — o Dr. Miau sintetiza o prompt cinematográfico perfeito para a animação!</li>
+      </ul>
+    </div>
   </div>
 
   <!-- Menu Suspenso de Perfil (Dropdown Estilo YouTube) -->
@@ -441,9 +452,20 @@
       <div class="dropdown-divider"></div>
       
       <div class="dropdown-menu-list">
+        <button class="dropdown-item" id="menuNewConversationBtn" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25);">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="dropdown-text" style="color: #10b981; font-weight: 700;">Nova Conversa (Reset Limpo)</span>
+        </button>
+
         <button class="dropdown-item" data-panel-target="perfil">
           <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span class="dropdown-text">Perfil</span>
+          <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <button class="dropdown-item" data-panel-target="trocar-conta">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span class="dropdown-text">Trocar de Usuário (Isolamento)</span>
           <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
         </button>
 
@@ -465,12 +487,17 @@
           <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
         </button>
 
-        <div class="dropdown-divider"></div>
-
         <button class="dropdown-item" data-panel-target="feedback">
           <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span class="dropdown-text">Enviar Feedback</span>
           <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+
+        <div class="dropdown-divider"></div>
+
+        <button class="dropdown-item" id="menuLogoutBtn" style="color: #f87171;">
+          <svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span class="dropdown-text" style="color: #f87171; font-weight: 600;">Sair da Conta (Logout)</span>
         </button>
       </div>
     </div>
@@ -501,6 +528,46 @@
             <span class="brief-label">Desde:</span>
             <span class="brief-value">Julho de 2026</span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel: Trocar de Usuário (Isolamento Estrito) -->
+    <div class="dropdown-panel hidden" id="panel-trocar-conta">
+      <div class="panel-header">
+        <button class="panel-back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <span class="panel-title">Alternar Conta / Sessão</span>
+      </div>
+      <div class="panel-body" style="padding: 12px 14px;">
+        <p class="panel-intro-text" style="font-size: 12px; margin-bottom: 12px; color: rgba(255,255,255,0.7);">
+          Cada usuário possui histórico, sessão e contexto 100% isolados, sem reutilização de prompts ou fotos de outros perfis:
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <button class="user-switch-option-btn" data-switch-user="alex" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; cursor: pointer; text-align: left;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: #efb577; color: #1e1e1e; font-weight: 700; display: flex; align-items: center; justify-content: center;">A</div>
+            <div>
+              <div style="font-weight: 600; font-size: 13px;">Alexandre Miau</div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5);">alexandre.miau@gmail.com</div>
+            </div>
+          </button>
+
+          <button class="user-switch-option-btn" data-switch-user="maria" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; cursor: pointer; text-align: left;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: #ec4899; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center;">M</div>
+            <div>
+              <div style="font-weight: 600; font-size: 13px;">Maria Pet</div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5);">maria.pet@gmail.com</div>
+            </div>
+          </button>
+
+          <button class="user-switch-option-btn" data-switch-user="guest" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; cursor: pointer; text-align: left;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: #38bdf8; color: #1e1e1e; font-weight: 700; display: flex; align-items: center; justify-content: center;">V</div>
+            <div>
+              <div style="font-weight: 600; font-size: 13px;">Novo Visitante Anônimo</div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Novo ID de usuário e sessão limpos</div>
+            </div>
+          </button>
         </div>
       </div>
     </div>
@@ -673,7 +740,7 @@
         <div class="api-modal__footer">
           <button class="api-modal__refresh" id="refreshApiStatusBtn">🔄 Re-testar Conexões</button>
         </div>
-       </div>
+      </div>
     </div>
 
     <!-- Modal da Galeria de Animações em Vídeo dos Pets -->
