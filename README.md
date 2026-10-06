@@ -1,9 +1,6 @@
-# 🐾 Dr. Miau Pet Agent — Arquitetura do Sistema
+#Arquitetura do Sistema
 
-Bem-vindo à documentação oficial do **Dr. Miau Pet Agent**! Este projeto combina inteligência artificial conversacional via **Google Gemini** com geração de animações 3D cinematográficas personalizadas na **Atlas Cloud (modelo Seedance 2.0)**.
-
-O projeto foi totalmente refatorado com foco em **clareza, manutenibilidade, separação de responsabilidades** e facilidade de navegação, especialmente para desenvolvedores focados em **Front-end**.
-
+documentação oficial 
 ---
 
 ## 📁 1. Estrutura de Pastas e Arquivos
@@ -66,7 +63,7 @@ O projeto foi totalmente refatorado com foco em **clareza, manutenibilidade, sep
 
 ---
 
-## 🚀 2. Como Rodar o Projeto
+## 2. Como Rodar o Projeto
 
 ### Pré-requisitos
 - Node.js versão 18 ou superior.
@@ -100,9 +97,7 @@ O projeto foi totalmente refatorado com foco em **clareza, manutenibilidade, sep
 
 ---
 
-## 🎨 3. Guia para Quem Mexe no Front-end
-
-Se você é desenvolvedor front-end, esta seção foi feita sob medida para o seu dia a dia!
+## 3. Guia Front-end
 
 ### 1. Onde ficam os Estilos visuais?
 - **Arquivo principal:** `public/styles.css`
@@ -185,7 +180,7 @@ Se você é desenvolvedor front-end, esta seção foi feita sob medida para o se
 
 ---
 
-## 🛡️ 4. Lista de Arquivos e Itens em Dúvida
+##  4. Lista de Arquivos e Itens em Dúvida
 
 ### Arquivos Criados ou Movidos na Refatoração
 - `server/config/env.js` (Criado: resolução unificada de variáveis de ambiente)
